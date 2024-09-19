@@ -1,0 +1,9 @@
+[package]
+name = "b3hash"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake3 = { version = "1.5", features = ["mmap"] }
+camino = "1.1"
+rayon = "1.10"
