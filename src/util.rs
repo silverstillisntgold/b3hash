@@ -3,8 +3,8 @@ use crate::types::HashedFile;
 use crate::IOResult;
 use blake3::{Hash, Hasher};
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
+use std::{collections::HashMap, os::windows::fs::MetadataExt};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
@@ -29,6 +29,36 @@ pub fn hash_files_vec(dir_path: &str) -> IOResult<Vec<HashedFile>> {
 
 /// Builds a collection from hashing all visible files within
 /// `dir_path` and placing the result in the given type.
+///
+/// There are multiple way of doing this. The most naive approach
+/// (the first thing I tried lol) is to iterate sequentially over the
+/// file list and hash each file with update_mmap_rayon(). But for small
+/// files parallel hashing cost more than it pays out, and since many
+/// directories contain mostly relatively small files, this isn't ideal.
+/// Instead, we can "iterate" in parallel over our list of files,
+/// and have each file be hashed sequentially using memory mapping.
+/// Internally, memory mapping will allocate a small buffer instead of
+/// mapping when the file is (roughly) too small to benefit from it.
+///
+/// When hashing folders which contain many small files and a few
+/// very large ones (like video game directories), it might be the case
+/// that we chew threw all the small files near-instantly, but the last
+/// few large files are then stuck chugging away. Since each file only
+/// hashes on a single thread, this approach may be leaving performance
+/// on the table. The problem is that blake3 is extremely fast even when
+/// single-threaded. So fast, in fact, that my poor old SATA SSD is instantly
+/// maxed out regardless of what directory I'm hashing. That being said,
+/// I'm currently unable to properly test how nested parallelism
+/// would perform in this scenario.
+///
+/// This approach would then introduce the problem of needing to store
+/// a larger struct to also know the size of each file to conditionally
+/// decide whether to hash serially or in parallel. The current solution
+/// is very simple and very fast, but adding additional complexity
+/// would 100% be worth it if I could guarantee improved directory hashing
+/// speed on directories with a mix of very large/small files. Even more
+/// so if I could avoid performance regressions with directories almost
+/// exclusively containing smaller files.
 #[inline(always)]
 fn hash_files_core<C, T>(dir_path: &str) -> IOResult<C>
 where
@@ -45,7 +75,7 @@ where
         .into_par_iter()
         .map(|file_path| {
             let mut hasher = Hasher::new();
-            // Using update_mmap() is more-or-less mandatory here, if we
+            // Using memory mapping is more-or-less mandatory here, if we
             // were to instead use regular update() we'd need to explicitly
             // load each file into memory and pass a reference to that buffer.
             // Since we're running all these file hashes in parallel, any

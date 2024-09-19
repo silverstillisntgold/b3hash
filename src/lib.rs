@@ -10,8 +10,10 @@ use util::*;
 /// Convenience type for `std::io::Result` with more explicit name.
 pub type IOResult<Type> = std::io::Result<Type>;
 
+/// TODO: docs
 pub const HASH_RESULTS_FILENAME: &str = ".b3hash_v1";
 
+/// TODO: docs
 #[inline(never)]
 pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     // It is absolutely critical that the returned Vec always
@@ -47,6 +49,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     })
 }
 
+/// TODO: docs
 #[inline(never)]
 pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
@@ -56,6 +59,7 @@ pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
     Ok(())
 }
 
+/// TODO: docs
 #[inline(never)]
 pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
@@ -65,6 +69,7 @@ pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     Ok(validate_data(old_hashes, new_hashes))
 }
 
+/// Alias for `hash_directory` but only using selected amount of threads.
 pub fn hash_directory_with_threads(
     dir_path: &str,
     num_threads: usize,
@@ -72,10 +77,12 @@ pub fn hash_directory_with_threads(
     with_threads(num_threads, || hash_directory(dir_path))
 }
 
+/// Alias for `create_hashfile` but only using selected amount of threads.
 pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IOResult<()> {
     with_threads(num_threads, || create_hashfile(dir_path))
 }
 
+/// Alias for `validate_hashfile` but only using selected amount of threads.
 pub fn validate_hashfile_with_threads(
     dir_path: &str,
     num_threads: usize,
