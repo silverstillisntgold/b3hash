@@ -3,8 +3,8 @@ use crate::types::HashedFile;
 use crate::IOResult;
 use blake3::{Hash, Hasher};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-use std::{collections::HashMap, os::windows::fs::MetadataExt};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
@@ -19,7 +19,7 @@ pub fn hash_files_map(dir_path: &str) -> IOResult<HashMap<String, Hash>> {
 
 /// Specialization of `hash_files_core` for `Vec`.
 ///
-/// Returned `Vec` is sorted by comparison of file paths.
+/// The returned `Vec` is sorted by the file path of each item.
 #[inline(never)]
 pub fn hash_files_vec(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     let mut hashed_files: Vec<HashedFile> = hash_files_core(dir_path)?;
@@ -27,31 +27,33 @@ pub fn hash_files_vec(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     Ok(hashed_files)
 }
 
-/// Builds a collection from hashing all visible files within
-/// `dir_path` and placing the result in the given type.
+/// Builds a collection by hashing all visible files beneath
+/// `dir_path` and turning the mapped result into the desired type.
 ///
-/// There are multiple way of doing this. The most naive approach
+/// There are multiple to approach this. The most naive approach
 /// (the first thing I tried lol) is to iterate sequentially over the
-/// file list and hash each file with update_mmap_rayon(). But for small
-/// files parallel hashing cost more than it pays out, and since many
-/// directories contain mostly relatively small files, this isn't ideal.
+/// file list and hash each distinct file in parallel. But for small
+/// files parallel hashing cost more than it pays out, and since directories
+/// often contain many relatively small files, this isn't ideal.
 /// Instead, we can "iterate" in parallel over our list of files,
 /// and have each file be hashed sequentially using memory mapping.
 /// Internally, memory mapping will allocate a small buffer instead of
 /// mapping when the file is (roughly) too small to benefit from it.
 ///
-/// When hashing folders which contain many small files and a few
+/// But when hashing folders which contain many small files and a few
 /// very large ones (like video game directories), it might be the case
 /// that we chew threw all the small files near-instantly, but the last
 /// few large files are then stuck chugging away. Since each file only
 /// hashes on a single thread, this approach may be leaving performance
-/// on the table. The problem is that blake3 is extremely fast even when
+/// on the table. The issue is that blake3 is extremely fast even when
 /// single-threaded. So fast, in fact, that my poor old SATA SSD is instantly
 /// maxed out regardless of what directory I'm hashing. That being said,
-/// I'm currently unable to properly test how nested parallelism
-/// would perform in this scenario.
+/// I'm currently unable to properly test how nested parallelism would
+/// perform in a scenario like this. I imagine servers with 50+ GiB/s read
+/// speed would greatly benefit from being able to always fully utilize
+/// however many threads they've given to b3hash to work with.
 ///
-/// This approach would then introduce the problem of needing to store
+/// This approach would unfortunetly introduce the problem of needing to store
 /// a larger struct to also know the size of each file to conditionally
 /// decide whether to hash serially or in parallel. The current solution
 /// is very simple and very fast, but adding additional complexity
@@ -75,7 +77,7 @@ where
         .into_par_iter()
         .map(|file_path| {
             let mut hasher = Hasher::new();
-            // Using memory mapping is more-or-less mandatory here, if we
+            // Using memory mapping is more-or-less mandatory here. If we
             // were to instead use regular update() we'd need to explicitly
             // load each file into memory and pass a reference to that buffer.
             // Since we're running all these file hashes in parallel, any
@@ -84,7 +86,7 @@ where
             // Memory mapping uses cached/standby memory, which allows other
             // running programs that have explicitly allocated memory
             // to maintain priority.
-            hasher.update_mmap(file_path.as_std_path())?;
+            hasher.update_mmap(file_path.as_str())?;
             // SAFETY: Since all files are descendants of dir_path,
             // they all have dir_path as a prefix.
             let stripped_file_path = unsafe { file_path.as_str().get_unchecked(prefix_len..) };
@@ -112,9 +114,7 @@ fn oi_vei(s: &str) -> String {
     }
 }
 
-/// Builds a Vec<u8> from the data in `hashed_files`.
-///
-/// The format is "(hash) (path)".
+/// TODO: docs
 pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
     /// 20MiB pre-allocation.
     const STARTING_CAP: usize = 20 * (1 << 20);
@@ -135,7 +135,16 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 /// TODO: docs
 pub fn parse_old_data(data: Vec<u8>) -> IOResult<Vec<(String, Hash)>> {
     // SAFETY: Old hashfile data should always be valid utf8
-    // because we serialize into valid utf8.
+    // because we serialize into valid utf8. Users changing
+    // hashfile contents or not veryifying the hashfile itself
+    // before trying to verify a directory is a user error so
+    // we don't waste time checking for it.
+    // Despite that, any imperfections in the resulting String
+    // will either propagate an error during parsing or an invalid
+    // file result during verification, neither of which
+    // are all that disastrous.
+    // TODO: Document that I've chosen to take this approach in
+    // user-facing code.
     unsafe { String::from_utf8_unchecked(data) }
         .par_lines()
         .map(|s| {
@@ -159,9 +168,9 @@ pub fn parse_old_data(data: Vec<u8>) -> IOResult<Vec<(String, Hash)>> {
         .collect()
 }
 
-/// Compares old and new data and potentially returns a Vec<String>
+/// Compares `old` and `new` and **potentially** returns a `Vec`
 /// containing the paths of files which failed validation (they either
-/// weren't present in the new data or their Hash was incorrect).
+/// weren't present in `new` or their Hash was incorrect).
 ///
 /// Returns `None` when there are no files that failed validation.
 pub fn validate_data(old: Vec<(String, Hash)>, new: HashMap<String, Hash>) -> Option<Vec<String>> {
@@ -176,7 +185,7 @@ pub fn validate_data(old: Vec<(String, Hash)>, new: HashMap<String, Hash>) -> Op
         match new.get(&old_name) {
             // Now that we know it exists, are the hashes equal?
             Some(new_hash) => match hash_eq(new_hash, &old_hash) {
-                // Validation sucessful so don't grow Vec.
+                // Validation sucessful: don't grow Vec.
                 true => None,
                 false => Some(old_name),
             },
@@ -198,7 +207,7 @@ fn hash_eq(x: &Hash, y: &Hash) -> bool {
         // than provided Hash::eq.
         x.as_bytes().eq(y.as_bytes())
     } else {
-        // May not be constant time so defer to provided Hash::eq
+        // May not be constant time so defer to provided Hash::eq,
         // which is guaranteed to always be constant time.
         x.eq(y)
     }

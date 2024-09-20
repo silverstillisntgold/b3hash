@@ -69,7 +69,8 @@ pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     Ok(validate_data(old_hashes, new_hashes))
 }
 
-/// Alias for `hash_directory` but only using selected amount of threads.
+/// Alias for `hash_directory`, but with a specified number
+/// of threads to be used in the rayon threadpool.
 pub fn hash_directory_with_threads(
     dir_path: &str,
     num_threads: usize,
@@ -77,12 +78,14 @@ pub fn hash_directory_with_threads(
     with_threads(num_threads, || hash_directory(dir_path))
 }
 
-/// Alias for `create_hashfile` but only using selected amount of threads.
+/// Alias for `create_hashfile`, but with a specified number
+/// of threads to be used in the rayon threadpool.
 pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IOResult<()> {
     with_threads(num_threads, || create_hashfile(dir_path))
 }
 
-/// Alias for `validate_hashfile` but only using selected amount of threads.
+/// Alias for `validate_hashfile`, but with a specified number
+/// of threads to be used in the rayon threadpool.
 pub fn validate_hashfile_with_threads(
     dir_path: &str,
     num_threads: usize,

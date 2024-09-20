@@ -9,7 +9,8 @@ const STARTING_CAP_FOLDERS: usize = 1 << 14;
 /// Builds a `Vec` containing the relative paths of all visible
 /// files that live beneath `dir_path`.
 ///
-/// The ordering of these paths is non-deterministic.
+/// The ordering of these paths is non-deterministic
+/// (we are at the mercy of the OS).
 #[inline(never)]
 pub fn get_files(dir_path: &Utf8Path) -> IOResult<Vec<Utf8PathBuf>> {
     let mut files = Vec::with_capacity(STARTING_CAP_FILES);
@@ -22,11 +23,12 @@ pub fn get_files(dir_path: &Utf8Path) -> IOResult<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
-/// Pushes all files within `dir_path` into the files `Vec`, and all
-/// folders into the folders `Vec`. Any entry that is marked as
-/// hidden is completely skipped. This means that visible files
-/// within hidden folders are just as hidden as files that themselves
-/// are hidden. Any other entry type is ignored.
+/// Pushes all files and folders beneath `dir_path` into
+/// their respective `Vec`.
+///
+/// Any entry that is marked as hidden is completely skipped.
+/// Visible files within hidden folders are just as hidden as files
+/// that themselves are hidden. Any other entry type is ignored.
 #[inline]
 fn push_entries(
     dir_path: &Utf8Path,
