@@ -21,7 +21,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     // directory. Otherwise, the overall directory hash will be random.
     // In our case this is solved by having hash_files_vec()
     // internally sort the Vec by file path before returning.
-    let hashed_files = hash_files_vec(dir_path)?;
+    let hashed_files = hash_files(dir_path)?;
     let mut total_bytes_hashed = 0;
     let mut hasher = Hasher::new();
 
@@ -53,7 +53,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
 #[inline(never)]
 pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
-    let hashed_files = hash_files_vec(dir_path.into())?;
+    let hashed_files = hash_files(dir_path)?;
     let data = serialize_hashed_files(hashed_files);
     std::fs::write(hashfile_path, data)?;
     Ok(())
@@ -64,12 +64,10 @@ pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
 pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let data = std::fs::read(hashfile_path)?;
-    let old_hashes = parse_old_data(data)?;
-    let new_hashes = hash_files_map(dir_path.into())?;
-    Ok(validate_data(old_hashes, new_hashes))
+    validate_data(dir_path, data)
 }
 
-/// Alias for `hash_directory`, but with a specified number
+/// Alias for `hash_directory`, but with `num_threads` number
 /// of threads to be used in the rayon threadpool.
 pub fn hash_directory_with_threads(
     dir_path: &str,
@@ -78,13 +76,13 @@ pub fn hash_directory_with_threads(
     with_threads(num_threads, || hash_directory(dir_path))
 }
 
-/// Alias for `create_hashfile`, but with a specified number
+/// Alias for `create_hashfile`, but with `num_threads` number
 /// of threads to be used in the rayon threadpool.
 pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IOResult<()> {
     with_threads(num_threads, || create_hashfile(dir_path))
 }
 
-/// Alias for `validate_hashfile`, but with a specified number
+/// Alias for `validate_hashfile`, but with `num_threads` number
 /// of threads to be used in the rayon threadpool.
 pub fn validate_hashfile_with_threads(
     dir_path: &str,
@@ -93,6 +91,8 @@ pub fn validate_hashfile_with_threads(
     with_threads(num_threads, || validate_hashfile(dir_path))
 }
 
+/// Convenience method for spawning new rayon threadpool with
+/// a set number of threads.
 fn with_threads<F, R>(num_threads: usize, func: F) -> R
 where
     F: FnOnce() -> R + Send,

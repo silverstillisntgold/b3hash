@@ -2,8 +2,8 @@ use crate::fs::get_files;
 use crate::types::HashedFile;
 use crate::IOResult;
 use blake3::{Hash, Hasher};
+use camino::Utf8Path;
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 
 const DELIM: char = ' ';
@@ -11,24 +11,8 @@ const NEWLINE: char = '\n';
 const REPLACEMENT: char = '/';
 const WINDOWS_MOMENT: char = '\\';
 
-/// Specialization of `hash_files_core` for `HashMap`.
-#[inline(never)]
-pub fn hash_files_map(dir_path: &str) -> IOResult<HashMap<String, Hash>> {
-    hash_files_core(dir_path)
-}
-
-/// Specialization of `hash_files_core` for `Vec`.
-///
-/// The returned `Vec` is sorted by the file path of each item.
-#[inline(never)]
-pub fn hash_files_vec(dir_path: &str) -> IOResult<Vec<HashedFile>> {
-    let mut hashed_files: Vec<HashedFile> = hash_files_core(dir_path)?;
-    hashed_files.sort_unstable_by(|a, b| a.cmp(b));
-    Ok(hashed_files)
-}
-
-/// Builds a collection by hashing all visible files beneath
-/// `dir_path` and turning the mapped result into the desired type.
+/// Builds a `Vec` by hashing all visible files beneath `dir_path`.
+/// The returned `Vec` is always sorted by file path.
 ///
 /// There are multiple to approach this. The most naive approach
 /// (the first thing I tried lol) is to iterate sequentially over the
@@ -53,30 +37,27 @@ pub fn hash_files_vec(dir_path: &str) -> IOResult<Vec<HashedFile>> {
 /// speed would greatly benefit from being able to always fully utilize
 /// however many threads they've given to b3hash to work with.
 ///
-/// This approach would unfortunetly introduce the problem of needing to store
+/// This approach would unfortunately introduce the problem of needing to store
 /// a larger struct to also know the size of each file to conditionally
 /// decide whether to hash serially or in parallel. The current solution
 /// is very simple and very fast, but adding additional complexity
-/// would 100% be worth it if I could guarantee improved directory hashing
+/// might be worth it if I could guarantee improved directory hashing
 /// speed on directories with a mix of very large/small files. Even more
 /// so if I could avoid performance regressions with directories almost
 /// exclusively containing smaller files.
-#[inline(always)]
-fn hash_files_core<C, T>(dir_path: &str) -> IOResult<C>
-where
-    C: FromParallelIterator<T>,
-    T: From<HashedFile> + Send,
-{
+pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     // One more than the actual length because we don't want
     // stripped file paths to start with a slash.
     // Both slash types are just ascii (a single byte in utf8),
     // so this still lands on a valid utf8 boundary.
     let prefix_len = dir_path.len() + 1;
 
-    get_files(dir_path.into())?
+    let mut file_list = get_files(dir_path.into())?;
+    file_list.sort_unstable();
+
+    file_list
         .into_par_iter()
         .map(|file_path| {
-            let mut hasher = Hasher::new();
             // Using memory mapping is more-or-less mandatory here. If we
             // were to instead use regular update() we'd need to explicitly
             // load each file into memory and pass a reference to that buffer.
@@ -86,15 +67,16 @@ where
             // Memory mapping uses cached/standby memory, which allows other
             // running programs that have explicitly allocated memory
             // to maintain priority.
-            hasher.update_mmap(file_path.as_str())?;
+            let mut hasher = Hasher::new();
+            hasher.update_mmap(file_path.as_std_path())?;
             // SAFETY: Since all files are descendants of dir_path,
             // they all have dir_path as a prefix.
             let stripped_file_path = unsafe { file_path.as_str().get_unchecked(prefix_len..) };
-            Ok(T::from(HashedFile {
+            Ok(HashedFile {
                 hash: hasher.finalize(),
                 path: oi_vei(stripped_file_path),
                 size: hasher.count(),
-            }))
+            })
         })
         .collect()
 }
@@ -122,18 +104,25 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
         .into_iter()
         .fold(Vec::with_capacity(STARTING_CAP), |mut buf, file| {
             // Prefer to_hex() over to_string() because it avoids heap allocation.
-            buf.extend_from_slice(file.hash.to_hex().as_bytes());
+            buf.extend(file.hash.to_hex().bytes());
             // The char constants used are represented as ascii values,
             // so forcing them into u8's and pushing them is fine.
             buf.push(DELIM as u8);
-            buf.extend_from_slice(file.path.as_bytes());
+            buf.extend(file.path.bytes());
             buf.push(NEWLINE as u8);
             buf
         })
 }
 
 /// TODO: docs
-pub fn parse_old_data(data: Vec<u8>) -> IOResult<Vec<(String, Hash)>> {
+pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<String>>> {
+    let dir_path_frfr = oi_vei(dir_path);
+    let dir_path = dir_path_frfr.as_str();
+
+    // We're building a Vec<String> containing the names of files
+    // which either are not present in our new data or whose
+    // new Hash does not match the old Hash.
+    //
     // SAFETY: Old hashfile data should always be valid utf8
     // because we serialize into valid utf8. Users changing
     // hashfile contents or not veryifying the hashfile itself
@@ -144,59 +133,55 @@ pub fn parse_old_data(data: Vec<u8>) -> IOResult<Vec<(String, Hash)>> {
     // file result during verification, neither of which
     // are all that disastrous.
     // TODO: Document that I've chosen to take this approach in
-    // user-facing code.
-    unsafe { String::from_utf8_unchecked(data) }
+    // user-facing code or change the approach.
+    let failed_files = unsafe { String::from_utf8_unchecked(old_data) }
         .par_lines()
-        .map(|s| {
-            let (hash, name) = s.split_once(DELIM).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::NotFound,
-                    format!(
-                        "Failed to find delimiter '{}' while parsing line '{}'.",
-                        DELIM, s
-                    ),
-                )
-            })?;
+        .filter_map(|line| match line.split_once(DELIM) {
             // We want the hash portion of the returned Vec tuple to be
             // a literal Hash value instead of the String representation
             // of one, since Hash has a specialized eq() that's much
             // faster than the eq() of String.
-            let hash = Hash::from_hex(hash)
-                .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-            Ok((name.to_string(), hash))
-        })
-        .collect()
-}
+            Some((hash, file_path)) => match Hash::from_hex(hash) {
+                Ok(old_hash) => {
+                    let path = Utf8Path::new(dir_path).join(file_path);
 
-/// Compares `old` and `new` and **potentially** returns a `Vec`
-/// containing the paths of files which failed validation (they either
-/// weren't present in `new` or their Hash was incorrect).
-///
-/// Returns `None` when there are no files that failed validation.
-pub fn validate_data(old: Vec<(String, Hash)>, new: HashMap<String, Hash>) -> Option<Vec<String>> {
-    // We're building a Vec<String> containing the names of files
-    // which either are not present in our new data or whose
-    // new Hash does not match the old Hash.
-    let failed_files: Vec<String> = old
-        .into_iter()
-        .filter_map(|(old_name, old_hash)|
-        // Does the new collection of hashed files contain
-        // the current file from the old data?
-        match new.get(&old_name) {
-            // Now that we know it exists, are the hashes equal?
-            Some(new_hash) => match hash_eq(new_hash, &old_hash) {
-                // Validation sucessful: don't grow Vec.
-                true => None,
-                false => Some(old_name),
+                    match path.try_exists() {
+                        Ok(true) => match Hasher::new().update_mmap(path.as_std_path()) {
+                            Ok(hasher) => {
+                                let new_hash = hasher.finalize();
+                                match hash_eq(&old_hash, &new_hash) {
+                                    true => None,
+                                    false => Some(Ok(path.into_string())),
+                                }
+                            }
+
+                            Err(e) => Some(Err(e)),
+                        },
+
+                        Ok(false) => Some(Ok(path.into_string())),
+
+                        Err(e) => Some(Err(e)),
+                    }
+                }
+
+                Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e.to_string()))),
             },
-            None => Some(old_name),
+
+            None => Some(Err(Error::new(
+                ErrorKind::NotFound,
+                format!(
+                    "Failed to find delimiter '{}' while parsing line '{}'.",
+                    DELIM, line
+                ),
+            ))),
         })
-        .collect();
+        .collect::<IOResult<Vec<_>>>()?;
+
     // The length of failed_files is the amount
     // of files that failed validation.
     match failed_files.len() {
-        0 => None,
-        _ => Some(failed_files),
+        0 => Ok(None),
+        _ => Ok(Some(failed_files)),
     }
 }
 

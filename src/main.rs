@@ -1,5 +1,6 @@
 const MEBIBYTE: f64 = (1 << 20) as f64;
 
+#[allow(unreachable_code)]
 fn main() -> std::io::Result<()> {
     let path = std::env::args()
         .nth(1)
@@ -8,7 +9,7 @@ fn main() -> std::io::Result<()> {
     /*let (res, t) = time(|| b3hash::create_hashfile(&path));
     let _ = res?;
     println!("Execution time: {:.2}", t);
-    //return Ok(());
+    return Ok(());*/
 
     let (res, t) = time(|| b3hash::validate_hashfile(&path));
     let res = res?;
@@ -17,10 +18,10 @@ fn main() -> std::io::Result<()> {
         println!("time: {:.2}", t);
     } else {
         println!("validation failed:");
-        println!("{:?}", res.unwrap());
+        println!("files failes: {}", res.unwrap().len());
     }
     println!();
-    return Ok(());*/
+    return Ok(());
 
     let (res, t) = time(|| b3hash::hash_directory(&path));
     let res = res?;

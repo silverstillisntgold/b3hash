@@ -6,8 +6,8 @@ const STARTING_CAP_FILES: usize = 1 << 18;
 /// Simultaneously store all visible folders in LLVM 19 without reallocating.
 const STARTING_CAP_FOLDERS: usize = 1 << 14;
 
-/// Builds a `Vec` containing the relative paths of all visible
-/// files that live beneath `dir_path`.
+/// Builds a `Vec` containing the paths of all visible
+/// files beneath `dir_path`.
 ///
 /// The ordering of these paths is non-deterministic
 /// (we are at the mercy of the OS).

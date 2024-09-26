@@ -35,11 +35,3 @@ impl Deref for HashedFile {
         &self.path
     }
 }
-
-// Used for building HashMap<String, Hash>
-impl From<HashedFile> for (String, Hash) {
-    #[inline]
-    fn from(value: HashedFile) -> Self {
-        (value.path, value.hash)
-    }
-}
