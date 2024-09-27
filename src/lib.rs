@@ -91,8 +91,8 @@ pub fn validate_hashfile_with_threads(
     with_threads(num_threads, || validate_hashfile(dir_path))
 }
 
-/// Convenience method for spawning new rayon threadpool with
-/// a set number of threads.
+/// Convenience method for running one-time usage function inside
+/// one-time usage rayon threadpool with a set number of threads.
 fn with_threads<F, R>(num_threads: usize, func: F) -> R
 where
     F: FnOnce() -> R + Send,

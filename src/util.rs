@@ -114,8 +114,14 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
         })
 }
 
-/// TODO: docs
+/// Simultaneously parses **and** validates file hashes from `old_data`,
+///
+/// Since each line contains both the file path relative to `dir_path`
+/// and the hash for said file, upon successfully parsing each line we
+/// can immedietely hash the associated file and compare hashes.
 pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<String>>> {
+    // Caller may actually see these paths when files fail validation
+    // or errors are returned so we erase windows retardation if it exists.
     let dir_path_frfr = oi_vei(dir_path);
     let dir_path = dir_path_frfr.as_str();
 
@@ -125,55 +131,63 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<S
     //
     // SAFETY: Old hashfile data should always be valid utf8
     // because we serialize into valid utf8. Users changing
-    // hashfile contents or not veryifying the hashfile itself
-    // before trying to verify a directory is a user error so
-    // we don't waste time checking for it.
-    // Despite that, any imperfections in the resulting String
-    // will either propagate an error during parsing or an invalid
-    // file result during verification, neither of which
-    // are all that disastrous.
-    // TODO: Document that I've chosen to take this approach in
-    // user-facing code or change the approach.
+    // hashfile contents or not verifying the hashfile itself
+    // before using it to verify a directory is a user error.
     let failed_files = unsafe { String::from_utf8_unchecked(old_data) }
         .par_lines()
-        .filter_map(|line| match line.split_once(DELIM) {
-            // We want the hash portion of the returned Vec tuple to be
-            // a literal Hash value instead of the String representation
-            // of one, since Hash has a specialized eq() that's much
-            // faster than the eq() of String.
-            Some((hash, file_path)) => match Hash::from_hex(hash) {
-                Ok(old_hash) => {
-                    let path = Utf8Path::new(dir_path).join(file_path);
-
-                    match path.try_exists() {
-                        Ok(true) => match Hasher::new().update_mmap(path.as_std_path()) {
-                            Ok(hasher) => {
-                                let new_hash = hasher.finalize();
-                                match hash_eq(&old_hash, &new_hash) {
-                                    true => None,
-                                    false => Some(Ok(path.into_string())),
+        .filter_map(|line| {
+            // Each line first needs to be partitioned into it's two parts:
+            // the hash itself and the file path for the file the hash
+            // was derived from. The aforementioned file path only contains
+            // it's path relative to `dir_path` (foreshadowing).
+            match line.split_once(DELIM) {
+                // We want the hash to be a literal Hash value instead of
+                // the String representation of one, since Hash has a
+                // specialized eq() that's much faster than the eq() of String.
+                Some((hash, file_path)) => match Hash::from_hex(hash) {
+                    Ok(old_hash) => {
+                        // Since file paths have been stripped of their common prefix,
+                        // which is always the relative path to their root directory,
+                        // it needs to be re-added.
+                        let path = Utf8Path::new(dir_path).join(file_path);
+                        // Rust documentation recommends against using
+                        // .exists(), so we don't.
+                        match path.try_exists() {
+                            Ok(true) => match Hasher::new().update_mmap(path.as_std_path()) {
+                                Ok(hasher) => {
+                                    let new_hash = hasher.finalize();
+                                    match hash_eq(&old_hash, &new_hash) {
+                                        true => None,
+                                        false => Some(Ok(path.into_string())),
+                                    }
                                 }
-                            }
-
+                                // My assumption is that if .try_exists() suceeds then
+                                // .update_mmap() should as well, but we still
+                                // handle the case where it doesn't.
+                                Err(e) => Some(Err(e)),
+                            },
+                            // No errors but file doesn't exist, so we add
+                            // as one of the files that failed validation.
+                            Ok(false) => Some(Ok(path.into_string())),
+                            // Error'd while determining if file exists.
+                            // Only scenarios where I actually think this might
+                            // proc is is file/folder permission is denied.
                             Err(e) => Some(Err(e)),
-                        },
-
-                        Ok(false) => Some(Ok(path.into_string())),
-
-                        Err(e) => Some(Err(e)),
+                        }
                     }
-                }
-
-                Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e.to_string()))),
-            },
-
-            None => Some(Err(Error::new(
-                ErrorKind::NotFound,
-                format!(
-                    "Failed to find delimiter '{}' while parsing line '{}'.",
-                    DELIM, line
-                ),
-            ))),
+                    // HexError needs to be explicitly converted to IOError.
+                    Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e.to_string()))),
+                },
+                // Delimiter wasn't found on current line (how tf???)
+                // so we cancel verification and propagate an error.
+                None => Some(Err(Error::new(
+                    ErrorKind::NotFound,
+                    format!(
+                        "Failed to find delimiter '{}' while parsing line '{}'.",
+                        DELIM, line
+                    ),
+                ))),
+            }
         })
         .collect::<IOResult<Vec<_>>>()?;
 
