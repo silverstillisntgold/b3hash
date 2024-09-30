@@ -96,10 +96,15 @@ fn oi_vei(s: &str) -> String {
     }
 }
 
-/// TODO: docs
+/// Collapses data from `hashed_files` into a `Vec` of bytes. This data
+/// represents a newline-deliniated `String` containing pairs of hashs
+/// and the file paths from which they were derived.
+///
+/// It's possible to parallelize this operation, using `rayon::flat_map`,
+/// but doing so regresses performance significantly.
 pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
-    /// 20MiB pre-allocation.
-    const STARTING_CAP: usize = 20 * (1 << 20);
+    /// 32MiB pre-allocation.
+    const STARTING_CAP: usize = 1 << 25;
     hashed_files
         .into_iter()
         .fold(Vec::with_capacity(STARTING_CAP), |mut buf, file| {
@@ -115,13 +120,14 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 }
 
 /// Simultaneously parses **and** validates file hashes from `old_data`,
+/// returning a list of file paths which failed validation.
 ///
 /// Since each line contains both the file path relative to `dir_path`
 /// and the hash for said file, upon successfully parsing each line we
 /// can immedietely hash the associated file and compare hashes.
-pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<String>>> {
-    // Caller may actually see these paths when files fail validation
-    // or errors are returned so we erase windows retardation if it exists.
+pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>> {
+    // Caller may actually see these paths when files fail validation or errors
+    // are returned, so we erase windows retardation if it exists.
     let dir_path_frfr = oi_vei(dir_path);
     let dir_path = dir_path_frfr.as_str();
 
@@ -133,25 +139,21 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<S
     // because we serialize into valid utf8. Users changing
     // hashfile contents or not verifying the hashfile itself
     // before using it to verify a directory is a user error.
-    let failed_files = unsafe { String::from_utf8_unchecked(old_data) }
+    unsafe { String::from_utf8_unchecked(old_data) }
         .par_lines()
         .filter_map(|line| {
             // Each line first needs to be partitioned into it's two parts:
-            // the hash itself and the file path for the file the hash
-            // was derived from. The aforementioned file path only contains
-            // it's path relative to `dir_path` (foreshadowing).
+            // the hash itself and the file path the hash was derived from.
             match line.split_once(DELIM) {
                 // We want the hash to be a literal Hash value instead of
                 // the String representation of one, since Hash has a
                 // specialized eq() that's much faster than the eq() of String.
                 Some((hash, file_path)) => match Hash::from_hex(hash) {
                     Ok(old_hash) => {
-                        // Since file paths have been stripped of their common prefix,
+                        // Since file paths are always stripped of their common prefix,
                         // which is always the relative path to their root directory,
                         // it needs to be re-added.
                         let path = Utf8Path::new(dir_path).join(file_path);
-                        // Rust documentation recommends against using
-                        // .exists(), so we don't.
                         match path.try_exists() {
                             Ok(true) => match Hasher::new().update_mmap(path.as_std_path()) {
                                 Ok(hasher) => {
@@ -161,9 +163,6 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<S
                                         false => Some(Ok(path.into_string())),
                                     }
                                 }
-                                // My assumption is that if .try_exists() suceeds then
-                                // .update_mmap() should as well, but we still
-                                // handle the case where it doesn't.
                                 Err(e) => Some(Err(e)),
                             },
                             // No errors but file doesn't exist, so we add
@@ -171,17 +170,17 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<S
                             Ok(false) => Some(Ok(path.into_string())),
                             // Error'd while determining if file exists.
                             // Only scenarios where I actually think this might
-                            // proc is is file/folder permission is denied.
+                            // proc is if file/folder permission is denied.
                             Err(e) => Some(Err(e)),
                         }
                     }
                     // HexError needs to be explicitly converted to IOError.
-                    Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e.to_string()))),
+                    Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e))),
                 },
                 // Delimiter wasn't found on current line (how tf???)
                 // so we cancel verification and propagate an error.
                 None => Some(Err(Error::new(
-                    ErrorKind::NotFound,
+                    ErrorKind::InvalidInput,
                     format!(
                         "Failed to find delimiter '{}' while parsing line '{}'.",
                         DELIM, line
@@ -189,14 +188,7 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Option<Vec<S
                 ))),
             }
         })
-        .collect::<IOResult<Vec<_>>>()?;
-
-    // The length of failed_files is the amount
-    // of files that failed validation.
-    match failed_files.len() {
-        0 => Ok(None),
-        _ => Ok(Some(failed_files)),
-    }
+        .collect()
 }
 
 #[inline(always)]

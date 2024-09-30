@@ -1,3 +1,7 @@
+//! b3hash is a crate for creating/validating directory tree hashfiles.
+//!
+//!
+
 mod fs;
 mod types;
 mod util;
@@ -10,8 +14,7 @@ use util::*;
 /// Convenience type for `std::io::Result` with more explicit name.
 pub type IOResult<Type> = std::io::Result<Type>;
 
-/// TODO: docs
-pub const HASH_RESULTS_FILENAME: &str = ".b3hash_v1";
+pub const HASH_RESULTS_FILENAME: &str = ".b3hash";
 
 /// TODO: docs
 #[inline(never)]
@@ -64,7 +67,13 @@ pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
 pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let data = std::fs::read(hashfile_path)?;
-    validate_data(dir_path, data)
+    let failed_files = validate_data(dir_path, data)?;
+    // The length of failed_files is the amount
+    // of files that failed validation.
+    Ok(match failed_files.len() {
+        0 => None,
+        _ => Some(failed_files),
+    })
 }
 
 /// Alias for `hash_directory`, but with `num_threads` number

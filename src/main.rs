@@ -6,10 +6,10 @@ fn main() -> std::io::Result<()> {
         .nth(1)
         .expect("please enter directory path");
 
-    /*let (res, t) = time(|| b3hash::create_hashfile(&path));
+    let (res, t) = time(|| b3hash::create_hashfile(&path));
     let _ = res?;
     println!("Execution time: {:.2}", t);
-    return Ok(());*/
+    return Ok(());
 
     let (res, t) = time(|| b3hash::validate_hashfile(&path));
     let res = res?;
