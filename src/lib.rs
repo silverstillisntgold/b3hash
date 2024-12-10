@@ -76,8 +76,8 @@ pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     })
 }
 
-/// Alias for `hash_directory`, but with `num_threads` number
-/// of threads to be used in the rayon threadpool.
+/// Alias for `hash_directory`, but using a local rayon
+/// threadpool with `num_threads` threads.
 pub fn hash_directory_with_threads(
     dir_path: &str,
     num_threads: usize,
@@ -85,32 +85,17 @@ pub fn hash_directory_with_threads(
     with_threads(num_threads, || hash_directory(dir_path))
 }
 
-/// Alias for `create_hashfile`, but with `num_threads` number
-/// of threads to be used in the rayon threadpool.
+/// Alias for `create_hashfile`, but using a local rayon
+/// threadpool with `num_threads` threads.
 pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IOResult<()> {
     with_threads(num_threads, || create_hashfile(dir_path))
 }
 
-/// Alias for `validate_hashfile`, but with `num_threads` number
-/// of threads to be used in the rayon threadpool.
+/// Alias for `validate_hashfile`, but using a local rayon
+/// threadpool with `num_threads` threads.
 pub fn validate_hashfile_with_threads(
     dir_path: &str,
     num_threads: usize,
 ) -> IOResult<Option<Vec<String>>> {
     with_threads(num_threads, || validate_hashfile(dir_path))
-}
-
-/// Convenience method for running one-time usage function inside
-/// one-time usage rayon threadpool with a set number of threads.
-fn with_threads<F, R>(num_threads: usize, func: F) -> R
-where
-    F: FnOnce() -> R + Send,
-    R: Send,
-{
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        // Is this actually the case or should the error be propagated?
-        .expect("BUG: Initializing unique threadpools should never fail.")
-        .install(func)
 }

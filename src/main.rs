@@ -6,7 +6,7 @@ fn main() -> std::io::Result<()> {
         .nth(1)
         .expect("please enter directory path");
 
-    let (res, t) = time(|| b3hash::create_hashfile(&path));
+    /*let (res, t) = time(|| b3hash::create_hashfile(&path));
     let _ = res?;
     println!("Execution time: {:.2}", t);
     return Ok(());
@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
         println!("files failes: {}", res.unwrap().len());
     }
     println!();
-    return Ok(());
+    return Ok(());*/
 
     let (res, t) = time(|| b3hash::hash_directory(&path));
     let res = res?;

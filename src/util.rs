@@ -11,15 +11,30 @@ const NEWLINE: char = '\n';
 const REPLACEMENT: char = '/';
 const WINDOWS_MOMENT: char = '\\';
 
+/// Convenience method for calling a function inside one-time
+/// usage rayon threadpool with a custom number of threads.
+pub fn with_threads<F, R>(num_threads: usize, func: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        // Is this actually the case or should the error be propagated?
+        .expect("Initializing unique threadpools should never fail.")
+        .install(func)
+}
+
 /// Builds a `Vec` by hashing all visible files beneath `dir_path`.
 /// The returned `Vec` is always sorted by file path.
 ///
-/// There are multiple to approach this. The most naive approach
+/// There are a few ways to approach this. The most naive approach
 /// (the first thing I tried lol) is to iterate sequentially over the
 /// file list and hash each distinct file in parallel. But for small
 /// files parallel hashing cost more than it pays out, and since directories
 /// often contain many relatively small files, this isn't ideal.
-/// Instead, we can "iterate" in parallel over our list of files,
+/// Instead, we can "iterate" in parallel over the whole list of files,
 /// and have each file be hashed sequentially using memory mapping.
 /// Internally, memory mapping will allocate a small buffer instead of
 /// mapping when the file is (roughly) too small to benefit from it.
@@ -27,21 +42,22 @@ const WINDOWS_MOMENT: char = '\\';
 /// But when hashing folders which contain many small files and a few
 /// very large ones (like video game directories), it might be the case
 /// that we chew threw all the small files near-instantly, but the last
-/// few large files are then stuck chugging away. Since each file only
-/// hashes on a single thread, this approach may be leaving performance
-/// on the table. The issue is that blake3 is extremely fast even when
+/// few large files are then stuck chugging away, since they only have access
+/// to a single thread. It might be better to track each file size, then decide
+/// whether to hash that specific file sequentially or in parallel on a
+/// per-file basis. The issue is that blake3 is extremely fast even when
 /// single-threaded. So fast, in fact, that my poor old SATA SSD is instantly
-/// maxed out regardless of what directory I'm hashing. That being said,
+/// maxed out regardless of what directory I'm hashing. With that being said,
 /// I'm currently unable to properly test how nested parallelism would
 /// perform in a scenario like this. I imagine servers with 50+ GiB/s read
 /// speed would greatly benefit from being able to always fully utilize
-/// however many threads they've given to b3hash to work with.
+/// however many threads they've given to b3hash.
 ///
 /// This approach would unfortunately introduce the problem of needing to store
 /// a larger struct to also know the size of each file to conditionally
-/// decide whether to hash serially or in parallel. The current solution
-/// is very simple and very fast, but adding additional complexity
-/// might be worth it if I could guarantee improved directory hashing
+/// decide whether to hash each file serially or in parallel.
+/// The current solution is very simple and very fast, but adding additional
+/// complexity might be worth it if I could guarantee improved directory hashing
 /// speed on directories with a mix of very large/small files. Even more
 /// so if I could avoid performance regressions with directories almost
 /// exclusively containing smaller files.
@@ -58,6 +74,7 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     file_list
         .into_par_iter()
         .map(|file_path| {
+            let mut hasher = Hasher::new();
             // Using memory mapping is more-or-less mandatory here. If we
             // were to instead use regular update() we'd need to explicitly
             // load each file into memory and pass a reference to that buffer.
@@ -67,7 +84,6 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
             // Memory mapping uses cached/standby memory, which allows other
             // running programs that have explicitly allocated memory
             // to maintain priority.
-            let mut hasher = Hasher::new();
             hasher.update_mmap(file_path.as_std_path())?;
             // SAFETY: Since all files are descendants of dir_path,
             // they all have dir_path as a prefix.
@@ -97,7 +113,7 @@ fn oi_vei(s: &str) -> String {
 }
 
 /// Collapses data from `hashed_files` into a `Vec` of bytes. This data
-/// represents a newline-deliniated `String` containing pairs of hashs
+/// represents a newline-deliniated `String` containing pairs of hashes
 /// and the file paths from which they were derived.
 ///
 /// It's possible to parallelize this operation, using `rayon::flat_map`,
@@ -120,14 +136,15 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 }
 
 /// Simultaneously parses **and** validates file hashes from `old_data`,
-/// returning a list of file paths which failed validation.
+/// returning a list of file paths which failed validation, or returning
+/// early with an IO error.
 ///
 /// Since each line contains both the file path relative to `dir_path`
 /// and the hash for said file, upon successfully parsing each line we
 /// can immedietely hash the associated file and compare hashes.
 pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>> {
     // Caller may actually see these paths when files fail validation or errors
-    // are returned, so we erase windows retardation if it exists.
+    // are returned, so we override windows retardation if it exists.
     let dir_path_frfr = oi_vei(dir_path);
     let dir_path = dir_path_frfr.as_str();
 
@@ -160,9 +177,12 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
                                     let new_hash = hasher.finalize();
                                     match hash_eq(&old_hash, &new_hash) {
                                         true => None,
+                                        // File exists but it's hash is incorrect:
+                                        // IT'S CORRUPTED OH NO.
                                         false => Some(Ok(path.into_string())),
                                     }
                                 }
+                                // I have zero clue when this would ever trigger.
                                 Err(e) => Some(Err(e)),
                             },
                             // No errors but file doesn't exist, so we add
@@ -193,8 +213,8 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
 
 #[inline(always)]
 fn hash_eq(x: &Hash, y: &Hash) -> bool {
-    if cfg!(target_arch = "x86_64") {
-        // Always constant time on x64 platforms, and faster
+    if cfg!(target_arch = "x86_64") || cfg!(target_arch = "x86") {
+        // Always constant time on x86 platforms, and faster
         // than provided Hash::eq.
         x.as_bytes().eq(y.as_bytes())
     } else {

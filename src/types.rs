@@ -1,7 +1,12 @@
 use blake3::Hash;
 use core::ops::Deref;
 
-/// TODO: docs
+/// Result of hashing a directory.
+///
+/// Contains the name of the directory, the original `Vec` of
+/// `HashedFile` instances, the cumulative hash representing all
+/// visible data within the directory, and the cumulative size of
+/// that data.
 pub struct HashedDirectory {
     pub dir_name: String,
     pub files: Vec<HashedFile>,
@@ -19,7 +24,10 @@ impl Deref for HashedDirectory {
     }
 }
 
-/// TODO: docs
+/// Result of hashing a file.
+///
+/// Contains the hash itself, the path from the root directory
+/// to the hashed file, and the size of said file.
 pub struct HashedFile {
     pub hash: Hash,
     pub path: String,
@@ -32,6 +40,6 @@ impl Deref for HashedFile {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.path
+        self.path.as_str()
     }
 }
