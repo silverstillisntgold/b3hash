@@ -29,7 +29,7 @@ pub fn get_files(dir_path: &Utf8Path) -> IOResult<Vec<Utf8PathBuf>> {
 /// Any entry that is marked as hidden is completely skipped.
 /// Visible files within hidden folders are just as hidden as files
 /// that themselves are hidden. Any other entry type is ignored.
-#[inline]
+#[inline(always)]
 fn push_entries(
     dir_path: &Utf8Path,
     files: &mut Vec<Utf8PathBuf>,

@@ -141,7 +141,7 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 ///
 /// Since each line contains both the file path relative to `dir_path`
 /// and the hash for said file, upon successfully parsing each line we
-/// can immedietely hash the associated file and compare hashes.
+/// can immediately hash the associated file and compare hashes.
 pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>> {
     // Caller may actually see these paths when files fail validation or errors
     // are returned, so we override windows retardation if it exists.

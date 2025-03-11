@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-blake3 = { version = "1.5", features = ["mmap"] }
+blake3 = { version = "1.6", features = ["mmap", "rayon"] }
 camino = "1.1"
 rayon = "1.10"

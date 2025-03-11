@@ -11,7 +11,7 @@ use camino::Utf8Path;
 use types::HashedDirectory;
 use util::*;
 
-/// Convenience type for `std::io::Result` with more explicit name.
+/// Convenience type for `std::io::Result`.
 pub type IOResult<Type> = std::io::Result<Type>;
 
 pub const HASH_RESULTS_FILENAME: &str = ".b3hash";
