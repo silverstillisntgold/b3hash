@@ -17,7 +17,6 @@ pub type IOResult<Type> = std::io::Result<Type>;
 pub const HASH_RESULTS_FILENAME: &str = ".b3hash";
 
 /// TODO: docs
-#[inline(never)]
 pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     // It is absolutely critical that the returned Vec always
     // returns the same ordering of file hashes, given the same root
@@ -42,7 +41,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     }
 
     Ok(HashedDirectory {
-        dir_name: Utf8Path::new(dir_path)
+        name: Utf8Path::new(dir_path)
             .file_name()
             .unwrap_or(dir_path)
             .to_string(),
@@ -53,7 +52,6 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
 }
 
 /// TODO: docs
-#[inline(never)]
 pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let hashed_files = hash_files(dir_path)?;
@@ -63,7 +61,6 @@ pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
 }
 
 /// TODO: docs
-#[inline(never)]
 pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let data = std::fs::read(hashfile_path)?;

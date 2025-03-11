@@ -1,14 +1,38 @@
 use blake3::Hash;
-use core::ops::Deref;
+use camino::Utf8PathBuf;
+use std::ops::Deref;
 
-/// Result of hashing a directory.
-///
-/// Contains the name of the directory, the original `Vec` of
-/// `HashedFile` instances, the cumulative hash representing all
-/// visible data within the directory, and the cumulative size of
-/// that data.
+pub struct FileDescriptor {
+    pub path: Utf8PathBuf,
+    pub size: u64,
+}
+
+impl Deref for FileDescriptor {
+    type Target = Utf8PathBuf;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+pub struct HashedFile {
+    pub hash: Hash,
+    pub path: String,
+    pub size: u64,
+}
+
+impl Deref for HashedFile {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.path.as_str()
+    }
+}
+
 pub struct HashedDirectory {
-    pub dir_name: String,
+    pub name: String,
     pub files: Vec<HashedFile>,
     pub hash: Hash,
     /// Cumulative size of all hashed files, in bytes.
@@ -21,25 +45,5 @@ impl Deref for HashedDirectory {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.files
-    }
-}
-
-/// Result of hashing a file.
-///
-/// Contains the hash itself, the path from the root directory
-/// to the hashed file, and the size of said file.
-pub struct HashedFile {
-    pub hash: Hash,
-    pub path: String,
-    /// Size of the hashed file, in bytes.
-    pub size: u64,
-}
-
-impl Deref for HashedFile {
-    type Target = str;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.path.as_str()
     }
 }

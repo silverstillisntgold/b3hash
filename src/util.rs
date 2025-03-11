@@ -10,6 +10,8 @@ const DELIM: char = ' ';
 const NEWLINE: char = '\n';
 const REPLACEMENT: char = '/';
 const WINDOWS_MOMENT: char = '\\';
+/// Files of at least 512 MiB are hashed using rayon.
+const PAR_HASH_THRESHOLD: u64 = 1 << 29;
 
 /// Convenience method for calling a function inside one-time
 /// usage rayon threadpool with a custom number of threads.
@@ -21,8 +23,7 @@ where
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
-        // Is this actually the case or should the error be propagated?
-        .expect("Initializing unique threadpools should never fail.")
+        .expect("initializing unique threadpools should never fail")
         .install(func)
 }
 
@@ -32,35 +33,13 @@ where
 /// There are a few ways to approach this. The most naive approach
 /// (the first thing I tried lol) is to iterate sequentially over the
 /// file list and hash each distinct file in parallel. But for small
-/// files parallel hashing cost more than it pays out, and since directories
+/// files parallel hashing costs more than it pays out, and since directories
 /// often contain many relatively small files, this isn't ideal.
-/// Instead, we can "iterate" in parallel over the whole list of files,
-/// and have each file be hashed sequentially using memory mapping.
+/// Instead, we can "iterate" in parallel over the whole list of files
+/// and have each file be hashed either sequentially or in parallel,
+/// depending on it's size. Both of these processes use memory mapping.
 /// Internally, memory mapping will allocate a small buffer instead of
-/// mapping when the file is (roughly) too small to benefit from it.
-///
-/// But when hashing folders which contain many small files and a few
-/// very large ones (like video game directories), it might be the case
-/// that we chew threw all the small files near-instantly, but the last
-/// few large files are then stuck chugging away, since they only have access
-/// to a single thread. It might be better to track each file size, then decide
-/// whether to hash that specific file sequentially or in parallel on a
-/// per-file basis. The issue is that blake3 is extremely fast even when
-/// single-threaded. So fast, in fact, that my poor old SATA SSD is instantly
-/// maxed out regardless of what directory I'm hashing. With that being said,
-/// I'm currently unable to properly test how nested parallelism would
-/// perform in a scenario like this. I imagine servers with 50+ GiB/s read
-/// speed would greatly benefit from being able to always fully utilize
-/// however many threads they've given to b3hash.
-///
-/// This approach would unfortunately introduce the problem of needing to store
-/// a larger struct to also know the size of each file to conditionally
-/// decide whether to hash each file serially or in parallel.
-/// The current solution is very simple and very fast, but adding additional
-/// complexity might be worth it if I could guarantee improved directory hashing
-/// speed on directories with a mix of very large/small files. Even more
-/// so if I could avoid performance regressions with directories almost
-/// exclusively containing smaller files.
+/// mapping when the file is approximately too small to benefit from it.
 pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     // One more than the actual length because we don't want
     // stripped file paths to start with a slash.
@@ -69,11 +48,11 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     let prefix_len = dir_path.len() + 1;
 
     let mut file_list = get_files(dir_path.into())?;
-    file_list.sort_unstable();
+    file_list.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
 
     file_list
         .into_par_iter()
-        .map(|file_path| {
+        .map(|file| {
             let mut hasher = Hasher::new();
             // Using memory mapping is more-or-less mandatory here. If we
             // were to instead use regular update() we'd need to explicitly
@@ -84,14 +63,25 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
             // Memory mapping uses cached/standby memory, which allows other
             // running programs that have explicitly allocated memory
             // to maintain priority.
-            hasher.update_mmap(file_path.as_std_path())?;
+            if file.size < PAR_HASH_THRESHOLD {
+                hasher.update_mmap(file.as_std_path())?;
+            } else {
+                hasher.update_mmap_rayon(file.as_std_path())?;
+            }
+            debug_assert!(
+                file.size == hasher.count(),
+                "BUG: size of file \"{}\" is {}, but {} bytes were hashed",
+                file.path,
+                file.size,
+                hasher.count()
+            );
             // SAFETY: Since all files are descendants of dir_path,
             // they all have dir_path as a prefix.
-            let stripped_file_path = unsafe { file_path.as_str().get_unchecked(prefix_len..) };
+            let stripped_file_path = unsafe { file.as_str().get_unchecked(prefix_len..) };
             Ok(HashedFile {
                 hash: hasher.finalize(),
                 path: oi_vei(stripped_file_path),
-                size: hasher.count(),
+                size: file.size,
             })
         })
         .collect()
@@ -124,12 +114,12 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
     hashed_files
         .into_iter()
         .fold(Vec::with_capacity(STARTING_CAP), |mut buf, file| {
-            // Prefer to_hex() over to_string() because it avoids heap allocation.
-            buf.extend(file.hash.to_hex().bytes());
+            // Prefer `to_hex` over `to_string` because it avoids heap allocation.
+            buf.extend_from_slice(file.hash.to_hex().as_bytes());
             // The char constants used are represented as ascii values,
             // so forcing them into u8's and pushing them is fine.
             buf.push(DELIM as u8);
-            buf.extend(file.path.bytes());
+            buf.extend_from_slice(file.path.as_bytes());
             buf.push(NEWLINE as u8);
             buf
         })
