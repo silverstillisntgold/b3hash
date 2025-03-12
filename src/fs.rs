@@ -38,15 +38,14 @@ fn push_entries(
     for entry in dir_path.read_dir_utf8()? {
         let entry = entry?;
         if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) == false {
-            // Retrieve metadata first, since Utf8PathBuf
-            // doesn't store this information.
-            let entry_md = entry.metadata()?;
-            let size = entry_md.len();
+            // Cache metadata, since `Utf8PathBuf` doesn't store this information.
+            let md = entry.metadata()?;
             // `Utf8PathBuf` is significantly smaller than `Utf8DirEntry`.
             let path = entry.into_path();
-            if entry_md.is_file() {
+            if md.is_file() {
+                let size = md.len();
                 files.push(FileDescriptor { path, size });
-            } else if entry_md.is_dir() {
+            } else if md.is_dir() {
                 folders.push(path);
             }
         }

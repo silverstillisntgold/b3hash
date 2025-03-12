@@ -10,8 +10,8 @@ const DELIM: char = ' ';
 const NEWLINE: char = '\n';
 const REPLACEMENT: char = '/';
 const WINDOWS_MOMENT: char = '\\';
-/// Files of at least 512 MiB are hashed using rayon.
-const PAR_HASH_THRESHOLD: u64 = 1 << 29;
+/// Files of at least 256 MiB are hashed using rayon.
+const PAR_HASH_THRESHOLD: u64 = 1 << 28;
 
 /// Convenience method for calling a function inside one-time
 /// usage rayon threadpool with a custom number of threads.
@@ -68,9 +68,9 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
             } else {
                 hasher.update_mmap_rayon(file.as_std_path())?;
             }
-            debug_assert!(
+            assert!(
                 file.size == hasher.count(),
-                "BUG: size of file \"{}\" is {}, but {} bytes were hashed",
+                "SEVERE BUG: size of file \"{}\" is {}, but {} bytes were hashed",
                 file.path,
                 file.size,
                 hasher.count()

@@ -18,8 +18,7 @@ fn main() -> std::io::Result<()> {
     } else {
         println!("validation failed:");
         println!("files failes: {}", res.unwrap().len());
-    }
-    println!();*/
+    }*/
 
     let (res, t) = time(|| b3hash::hash_directory(&path));
     let res = res?;
@@ -34,6 +33,7 @@ fn main() -> std::io::Result<()> {
         "Execution speed: {:.2} MiB/s",
         res.size as f64 / t / MEBIBYTE
     );
+
     println!();
     Ok(())
 }

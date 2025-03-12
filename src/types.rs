@@ -16,21 +16,6 @@ impl Deref for FileDescriptor {
     }
 }
 
-pub struct HashedFile {
-    pub hash: Hash,
-    pub path: String,
-    pub size: u64,
-}
-
-impl Deref for HashedFile {
-    type Target = str;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.path.as_str()
-    }
-}
-
 pub struct HashedDirectory {
     pub name: String,
     pub files: Vec<HashedFile>,
@@ -45,5 +30,20 @@ impl Deref for HashedDirectory {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.files
+    }
+}
+
+pub struct HashedFile {
+    pub hash: Hash,
+    pub path: String,
+    pub size: u64,
+}
+
+impl Deref for HashedFile {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.path
     }
 }
