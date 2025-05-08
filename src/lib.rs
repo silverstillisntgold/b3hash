@@ -1,6 +1,8 @@
-//! b3hash is a crate for creating/validating directory tree hashfiles.
-//!
-//!
+/*!
+# B3Hash
+
+A crate for creating/validating directory tree hashfiles.
+*/
 
 mod fs;
 mod types;

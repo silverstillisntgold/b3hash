@@ -1,6 +1,6 @@
+use crate::IOResult;
 use crate::fs::get_files;
 use crate::types::HashedFile;
-use crate::IOResult;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
 use rayon::prelude::*;
@@ -47,7 +47,7 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     // so this still lands on a valid utf8 boundary.
     let prefix_len = dir_path.len() + 1;
 
-    let mut file_list = get_files(dir_path.into())?;
+    let mut file_list = get_files(dir_path)?;
     file_list.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
 
     file_list
@@ -201,15 +201,15 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
         .collect()
 }
 
-#[inline(always)]
+#[inline]
 fn hash_eq(x: &Hash, y: &Hash) -> bool {
     if cfg!(target_arch = "x86_64") || cfg!(target_arch = "x86") {
         // Always constant time on x86 platforms, and faster
-        // than provided Hash::eq.
+        // than provided `Hash::eq`.
         x.as_bytes().eq(y.as_bytes())
     } else {
-        // May not be constant time so defer to provided Hash::eq,
-        // which is guaranteed to always be constant time.
+        // May not be constant time so defer to provided `Hash::eq`,
+        // which is guaranteed to be constant time.
         x.eq(y)
     }
 }

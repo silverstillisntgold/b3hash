@@ -1,5 +1,5 @@
 use blake3::Hash;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use std::ops::Deref;
 
 pub struct FileDescriptor {
@@ -8,11 +8,11 @@ pub struct FileDescriptor {
 }
 
 impl Deref for FileDescriptor {
-    type Target = Utf8PathBuf;
+    type Target = Utf8Path;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.path
+        self.path.as_path()
     }
 }
 
@@ -29,7 +29,7 @@ impl Deref for HashedDirectory {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.files
+        self.files.as_slice()
     }
 }
 
@@ -44,6 +44,6 @@ impl Deref for HashedFile {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.path
+        self.path.as_str()
     }
 }

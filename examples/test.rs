@@ -1,6 +1,7 @@
 const MEBIBYTE: f64 = (1 << 20) as f64;
 
 fn main() -> std::io::Result<()> {
+    println!("starting up");
     let path = std::env::args()
         .nth(1)
         .expect("please enter directory path");
