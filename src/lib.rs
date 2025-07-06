@@ -4,7 +4,7 @@
 A crate for creating/validating directory tree hashfiles.
 */
 
-mod fs;
+pub mod fs;
 mod types;
 mod util;
 

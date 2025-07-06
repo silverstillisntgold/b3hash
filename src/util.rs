@@ -4,14 +4,13 @@ use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
 use rayon::prelude::*;
-use std::io::{Error, ErrorKind};
+use std::fs;
+use std::io::{BufReader, Error, ErrorKind};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
 const REPLACEMENT: char = '/';
 const WINDOWS_MOMENT: char = '\\';
-/// Files of at least 256 MiB are hashed using rayon.
-const PAR_HASH_THRESHOLD: u64 = 1 << 28;
 
 /// Convenience method for calling a function inside one-time
 /// usage rayon threadpool with a custom number of threads.
@@ -63,13 +62,13 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
             // Memory mapping uses cached/standby memory, which allows other
             // running programs that have explicitly allocated memory
             // to maintain priority.
-            if file.size < PAR_HASH_THRESHOLD {
-                hasher.update_mmap(file.as_std_path())?;
-            } else {
-                hasher.update_mmap_rayon(file.as_std_path())?;
-            }
-            assert!(
-                file.size == hasher.count(),
+            let cur_file = fs::File::open(file.as_std_path())?;
+            const CAP: usize = 1 << 16;
+            let reader = BufReader::with_capacity(CAP, cur_file);
+            hasher.update_reader(reader)?;
+            assert_eq!(
+                file.size,
+                hasher.count(),
                 "SEVERE BUG: size of file \"{}\" is {}, but {} bytes were hashed",
                 file.path,
                 file.size,
@@ -162,19 +161,22 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
                         // it needs to be re-added.
                         let path = Utf8Path::new(dir_path).join(file_path);
                         match path.try_exists() {
-                            Ok(true) => match Hasher::new().update_mmap(path.as_std_path()) {
-                                Ok(hasher) => {
-                                    let new_hash = hasher.finalize();
-                                    match hash_eq(&old_hash, &new_hash) {
-                                        true => None,
-                                        // File exists but it's hash is incorrect:
-                                        // IT'S CORRUPTED OH NO.
-                                        false => Some(Ok(path.into_string())),
+                            Ok(true) => {
+                                let file = fs::File::open(path.as_std_path()).unwrap();
+                                match Hasher::new().update_reader(file) {
+                                    Ok(hasher) => {
+                                        let new_hash = hasher.finalize();
+                                        match hash_eq(&old_hash, &new_hash) {
+                                            true => None,
+                                            // File exists but it's hash is incorrect:
+                                            // IT'S CORRUPTED OH NO.
+                                            false => Some(Ok(path.into_string())),
+                                        }
                                     }
+                                    // I have zero clue when this would ever trigger.
+                                    Err(e) => Some(Err(e)),
                                 }
-                                // I have zero clue when this would ever trigger.
-                                Err(e) => Some(Err(e)),
-                            },
+                            }
                             // No errors but file doesn't exist, so we add
                             // as one of the files that failed validation.
                             Ok(false) => Some(Ok(path.into_string())),
