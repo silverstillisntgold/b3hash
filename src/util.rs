@@ -4,8 +4,8 @@ use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
 use rayon::prelude::*;
-use std::fs;
-use std::io::{BufReader, Error, ErrorKind};
+use std::fs::File;
+use std::io::{Error, ErrorKind};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
@@ -53,23 +53,12 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
         .into_par_iter()
         .map(|file| {
             let mut hasher = Hasher::new();
-            // Using memory mapping is more-or-less mandatory here. If we
-            // were to instead use regular update() we'd need to explicitly
-            // load each file into memory and pass a reference to that buffer.
-            // Since we're running all these file hashes in parallel, any
-            // folder containing enough large files to exceed available RAM will
-            // quickly do so, making the system extremely unresponsive.
-            // Memory mapping uses cached/standby memory, which allows other
-            // running programs that have explicitly allocated memory
-            // to maintain priority.
-            let cur_file = fs::File::open(file.as_std_path())?;
-            const CAP: usize = 1 << 16;
-            let reader = BufReader::with_capacity(CAP, cur_file);
+            let reader = File::open(file.as_std_path())?;
             hasher.update_reader(reader)?;
             assert_eq!(
                 file.size,
                 hasher.count(),
-                "SEVERE BUG: size of file \"{}\" is {}, but {} bytes were hashed",
+                "SEVERE BUG: size of file '{}' is {}, but {} bytes were hashed",
                 file.path,
                 file.size,
                 hasher.count()
@@ -162,7 +151,7 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
                         let path = Utf8Path::new(dir_path).join(file_path);
                         match path.try_exists() {
                             Ok(true) => {
-                                let file = fs::File::open(path.as_std_path()).unwrap();
+                                let file = File::open(path.as_std_path()).unwrap();
                                 match Hasher::new().update_reader(file) {
                                     Ok(hasher) => {
                                         let new_hash = hasher.finalize();

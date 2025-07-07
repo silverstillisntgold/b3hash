@@ -1,6 +1,30 @@
-use blake3::Hash;
+#![allow(unused)]
+
+use crate::IOResult;
+use blake3::{Hash, Hasher};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::ops::Deref;
+use std::{fs::File, ops::Deref};
+
+pub struct HashedFileV2 {
+    pub hash: Hash,
+    pub path: Utf8PathBuf,
+    pub size: u64,
+}
+
+pub struct FileHasher;
+
+impl FileHasher {
+    pub fn run(path: Utf8PathBuf) -> IOResult<HashedFileV2> {
+        let path_ref = path.as_std_path();
+        let file_handle = File::open(path_ref)?;
+        let mut hasher = Hasher::new();
+        hasher.update_reader(file_handle)?;
+        let hash = hasher.finalize();
+        let size = hasher.count();
+        let ret = HashedFileV2 { hash, path, size };
+        Ok(ret)
+    }
+}
 
 pub struct FileDescriptor {
     pub path: Utf8PathBuf,
