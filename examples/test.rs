@@ -1,6 +1,14 @@
 const MEBIBYTE: f64 = (1 << 20) as f64;
 
 fn main() -> std::io::Result<()> {
+    /*let data = std::fs::read_to_string(".gitignore").unwrap();
+    data.trim().lines().for_each(|s| {
+        let s = s.trim();
+        if !s.starts_with('#') && s.chars().nth(0).is_some() {
+            println!("'{}'", s);
+        }
+    });*/
+
     println!("running program");
     let path = std::env::args()
         .nth(1)

@@ -38,7 +38,6 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     // and in-place implementation is prefered.
     for file in &hashed_files {
         hasher.update(file.hash.as_bytes());
-        hasher.update(file.path.as_bytes());
         total_bytes_hashed += file.size;
     }
 

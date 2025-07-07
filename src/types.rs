@@ -14,15 +14,15 @@ pub struct HashedFileV2 {
 pub struct FileHasher;
 
 impl FileHasher {
+    #[inline]
     pub fn run(path: Utf8PathBuf) -> IOResult<HashedFileV2> {
         let path_ref = path.as_std_path();
-        let file_handle = File::open(path_ref)?;
+        let file_reader = File::open(path_ref)?;
         let mut hasher = Hasher::new();
-        hasher.update_reader(file_handle)?;
+        hasher.update_reader(file_reader)?;
         let hash = hasher.finalize();
         let size = hasher.count();
-        let ret = HashedFileV2 { hash, path, size };
-        Ok(ret)
+        Ok(HashedFileV2 { hash, path, size })
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::IOResult;
-use crate::fs::get_files;
+use crate::fs::*;
 use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
@@ -46,7 +46,12 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     // so this still lands on a valid utf8 boundary.
     let prefix_len = dir_path.len() + 1;
 
-    let mut file_list = get_files(dir_path)?;
+    let start = std::time::Instant::now();
+    let mut file_list = get_files_v2(dir_path)?;
+    let delta = std::time::Instant::now()
+        .duration_since(start)
+        .as_secs_f64();
+    println!("Time to collect files: {:.2} seconds", delta);
     file_list.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
 
     file_list
