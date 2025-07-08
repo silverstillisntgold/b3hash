@@ -62,21 +62,13 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
             // Calls to `Hasher::update_reader` internally buffer 64KiB of
             // data, so we don't need to worry about doing that manually.
             hasher.update_reader(reader)?;
-            assert_eq!(
-                file.size,
-                hasher.count(),
-                "SEVERE BUG: size of file '{}' is {}, but {} bytes were hashed",
-                file.path,
-                file.size,
-                hasher.count()
-            );
             // SAFETY: Since all files are descendants of dir_path,
             // they all have dir_path as a prefix.
             let stripped_file_path = unsafe { file.as_str().get_unchecked(prefix_len..) };
             Ok(HashedFile {
                 hash: hasher.finalize(),
                 path: oi_vei(stripped_file_path),
-                size: file.size,
+                size: hasher.count(),
             })
         })
         .collect()

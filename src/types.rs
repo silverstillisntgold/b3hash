@@ -26,20 +26,6 @@ impl FileHasher {
     }
 }
 
-pub struct FileDescriptor {
-    pub path: Utf8PathBuf,
-    pub size: u64,
-}
-
-impl Deref for FileDescriptor {
-    type Target = Utf8Path;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.path.as_path()
-    }
-}
-
 pub struct HashedDirectory {
     pub name: String,
     pub files: Vec<HashedFile>,
