@@ -23,8 +23,8 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     // It is absolutely critical that the returned Vec always
     // returns the same ordering of file hashes, given the same root
     // directory. Otherwise, the overall directory hash will be random.
-    // In our case this is solved by having hash_files_vec()
-    // internally sort the Vec by file path before returning.
+    // In our case this is solved by having hash_files() internally
+    // sort the Vec by file path before returning.
     let hashed_files = hash_files(dir_path)?;
     let mut total_bytes_hashed = 0;
     let mut hasher = Hasher::new();

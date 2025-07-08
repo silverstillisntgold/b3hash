@@ -47,7 +47,7 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     let prefix_len = dir_path.len() + 1;
 
     let start = std::time::Instant::now();
-    let mut file_list = get_files_v2(dir_path)?;
+    let mut file_list = get_files(dir_path.into())?;
     let delta = std::time::Instant::now()
         .duration_since(start)
         .as_secs_f64();
@@ -59,6 +59,8 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
         .map(|file| {
             let mut hasher = Hasher::new();
             let reader = File::open(file.as_std_path())?;
+            // Calls to `Hasher::update_reader` internally buffer 64KiB of
+            // data, so we don't need to worry about doing that manually.
             hasher.update_reader(reader)?;
             assert_eq!(
                 file.size,
