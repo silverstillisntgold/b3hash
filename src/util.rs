@@ -52,6 +52,9 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
         .duration_since(start)
         .as_secs_f64();
     println!("Time to collect files: {:.2} seconds", delta);
+    // It's more effective for sorting to be done here,
+    // since `Utf8PathBuf` is effectively just a `String`,
+    // and is faster to sort than `HashedFile`.
     file_list.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
 
     file_list
