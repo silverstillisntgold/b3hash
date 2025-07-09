@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 blake3 = "1.8"
 camino = "1.1"
+crossbeam-channel = "0.5"
 rayon = "1.10"
