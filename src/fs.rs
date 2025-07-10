@@ -33,7 +33,7 @@ pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
     match error_rx.try_recv() {
         // An `Err` here indicates that our error channel
         // is empty, which is what we want.
-        Err(_) => Ok(path_rx.into_iter().collect()),
+        Err(_) => Ok(path_rx.try_iter().collect()),
         Ok(e) => Err(e),
     }
 }

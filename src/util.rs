@@ -51,7 +51,11 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     let delta = std::time::Instant::now()
         .duration_since(start)
         .as_secs_f64();
-    println!("Time to collect files: {:.2} seconds", delta);
+    println!(
+        "Time to collect {} files: {:.2} seconds",
+        file_list.len(),
+        delta
+    );
     // It's more effective for sorting to be done here,
     // since `Utf8PathBuf` is effectively just a `String`,
     // and is faster to sort than `HashedFile`.
