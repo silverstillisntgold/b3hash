@@ -31,7 +31,7 @@ pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
     // No need to use blocking operations because both senders
     // will have been dropped/closed by this point.
     match error_rx.try_recv() {
-        // An `Err` here means that our error channel
+        // An `Err` here indicates that our error channel
         // is empty, which is what we want.
         Err(_) => Ok(path_rx.into_iter().collect()),
         Ok(e) => Err(e),
@@ -43,7 +43,11 @@ macro_rules! unwrap_or_send_error {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                $err_chan.send(e).unwrap();
+                // SAFETY: This operation will never fail, because the channel
+                // is unbounded and the receiver always outlives the sender.
+                unsafe {
+                    $err_chan.try_send(e).unwrap_unchecked();
+                }
                 return;
             }
         }
@@ -69,11 +73,14 @@ fn this_is_a_gyatt_function(
             continue;
         }
         let metadata = unwrap_or_send_error!(entry.metadata(), error_tx);
-        // `Utf8PathBuf` is smaller than `Utf8DirEntry`.
         let path = entry.into_path();
         if metadata.is_file() {
             if metadata.len() > 0 {
-                path_tx.send(path).unwrap();
+                // SAFETY: This operation will never fail, because the channel
+                // is unbounded and the receiver always outlives the sender.
+                unsafe {
+                    path_tx.try_send(path).unwrap_unchecked();
+                }
             }
         } else if metadata.is_dir() {
             let error_rx = error_rx.clone();
