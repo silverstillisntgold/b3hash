@@ -1,5 +1,5 @@
 use crate::IOResult;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use crossbeam_channel::{Receiver, Sender};
 use std::io;
 
@@ -7,33 +7,47 @@ const HIDDEN_ENTRY_PREFIX: char = '.';
 
 /// Build a `Vec` containing the paths of all visible files within `dir_path`.
 ///
-/// The ordering of these paths is non-deterministic.
+/// This is done in such a way that each directory spawns a distinct rayon task,
+/// containing it's own sequential iterator over it's contents. Valid file paths are sent
+/// through a channel to later be collected into the returned `Vec`. If an error is
+/// encountered, each rayon task will terminate as soon as possible and the error
+/// will be propagated to the caller.
+///
+/// The ordering of paths in the returned `Vec` is non-deterministic.
 #[inline(never)]
-pub fn get_files(dir_path: &Utf8Path) -> IOResult<Vec<Utf8PathBuf>> {
+pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
     let (path_tx, path_rx) = crossbeam_channel::unbounded::<Utf8PathBuf>();
     let (error_tx, error_rx) = crossbeam_channel::unbounded::<io::Error>();
 
-    // This **must** be cloned before being passed into the scope.
-    // Otherwise `error_rx` will be moved into the scope and dropped when it
-    // ends, causing our upcoming `recv` call to block indefinitely.
+    // Need to pass a cloned instance into the scope, or the original
+    // `error_rx` will be dropped before we need to use it.
+    // This doesn't need to be done for the senders because we want them
+    // to be dropped/closed when all work is completed.
     let error_rx_clone = error_rx.clone();
-    rayon::scope(move |scope| {
-        this_is_a_gyatt_function(
-            dir_path.to_path_buf(),
-            error_rx_clone,
-            error_tx,
-            path_tx,
-            scope,
-        );
+    rayon::in_place_scope(move |scope| {
+        this_is_a_gyatt_function(dir_path, error_rx_clone, error_tx, path_tx, scope);
     });
 
-    // All other `error_rx` clones should have been dropped
-    // by now, since `rayon::scope` blocks until it's internal
-    // operations have all completed.
+    // No need to use blocking operations because both senders
+    // will have been dropped/closed by this point.
     match error_rx.try_recv() {
+        // An `Err` here means that our error channel
+        // is empty, which is what we want.
         Err(_) => Ok(path_rx.into_iter().collect()),
         Ok(e) => Err(e),
     }
+}
+
+macro_rules! unwrap_or_send_error {
+    ($expr: expr, $err_chan: ident) => {
+        match $expr {
+            Ok(value) => value,
+            Err(e) => {
+                $err_chan.send(e).unwrap();
+                return;
+            }
+        }
+    };
 }
 
 fn this_is_a_gyatt_function(
@@ -43,35 +57,18 @@ fn this_is_a_gyatt_function(
     path_tx: Sender<Utf8PathBuf>,
     scope: &rayon::Scope,
 ) {
-    let entries = match dir_path.read_dir_utf8() {
-        Ok(tmp) => tmp,
-        Err(e) => {
-            error_tx.send(e).unwrap();
-            return;
-        }
-    };
+    let entries = unwrap_or_send_error!(dir_path.read_dir_utf8(), error_tx);
     for entry in entries {
-        // End early if some other thread has encountered an error.
+        // Terminate early if some other worker has
+        // already sent out an error.
         if !error_rx.is_empty() {
             return;
         }
-        let entry = match entry {
-            Ok(tmp) => tmp,
-            Err(e) => {
-                error_tx.send(e).unwrap();
-                return;
-            }
-        };
+        let entry = unwrap_or_send_error!(entry, error_tx);
         if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) {
             continue;
         }
-        let metadata = match entry.metadata() {
-            Ok(tmp) => tmp,
-            Err(e) => {
-                error_tx.send(e).unwrap();
-                return;
-            }
-        };
+        let metadata = unwrap_or_send_error!(entry.metadata(), error_tx);
         // `Utf8PathBuf` is smaller than `Utf8DirEntry`.
         let path = entry.into_path();
         if metadata.is_file() {
@@ -88,142 +85,3 @@ fn this_is_a_gyatt_function(
         }
     }
 }
-
-/*use crate::types::HashedFile;
-
-/// Windows always has to be so funny and unique >:(
-#[inline]
-fn oi_vei(s: &str) -> String {
-    const REPLACEMENT: char = '/';
-    const WINDOWS_MOMENT: char = '\\';
-    if cfg!(windows) {
-        s.chars()
-            .map(|c| match c == WINDOWS_MOMENT {
-                false => c,
-                true => REPLACEMENT,
-            })
-            .collect()
-    } else {
-        s.to_string()
-    }
-}
-
-pub fn ayo_wtf(dir_path: &Utf8Path, prefix_len: usize) -> IOResult<Vec<HashedFile>> {
-    fn hasher_function_with_nice_gyatt(
-        file: Utf8PathBuf,
-        prefix_len: usize,
-        error_tx: Sender<io::Error>,
-        hash_tx: Sender<HashedFile>,
-    ) {
-        let mut hasher = blake3::Hasher::new();
-        let reader = match std::fs::File::open(file.as_std_path()) {
-            Ok(tmp) => tmp,
-            Err(e) => {
-                error_tx.send(e).unwrap();
-                return;
-            }
-        };
-        // Calls to `Hasher::update_reader` internally buffer 64KiB of
-        // data, so we don't need to worry about doing that manually.
-        match hasher.update_reader(reader) {
-            Ok(_) => {}
-            Err(e) => {
-                error_tx.send(e).unwrap();
-                return;
-            }
-        };
-        // SAFETY: Since all files are descendants of dir_path,
-        // they all have dir_path as a prefix.
-        let stripped_file_path = unsafe { file.as_str().get_unchecked(prefix_len..) };
-        hash_tx
-            .send(HashedFile {
-                hash: hasher.finalize(),
-                path: oi_vei(stripped_file_path),
-                size: hasher.count(),
-            })
-            .unwrap();
-    }
-
-    fn this_is_a_gyatt_function(
-        dir_path: Utf8PathBuf,
-        prefix_len: usize,
-        error_rx: Receiver<io::Error>,
-        error_tx: Sender<io::Error>,
-        hash_tx: Sender<HashedFile>,
-        scope: &rayon::Scope,
-    ) {
-        let entries = match dir_path.read_dir_utf8() {
-            Ok(tmp) => tmp,
-            Err(e) => {
-                error_tx.send(e).unwrap();
-                return;
-            }
-        };
-        for entry in entries {
-            // End early if some other thread has encountered an error.
-            if !error_rx.is_empty() {
-                return;
-            }
-            let entry = match entry {
-                Ok(tmp) => tmp,
-                Err(e) => {
-                    error_tx.send(e).unwrap();
-                    return;
-                }
-            };
-            if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) {
-                continue;
-            }
-            let metadata = match entry.metadata() {
-                Ok(tmp) => tmp,
-                Err(e) => {
-                    error_tx.send(e).unwrap();
-                    return;
-                }
-            };
-            // `Utf8PathBuf` is smaller than `Utf8DirEntry`.
-            let path = entry.into_path();
-            if metadata.is_file() {
-                if metadata.len() > 0 {
-                    let error_tx = error_tx.clone();
-                    let hash_tx = hash_tx.clone();
-                    scope.spawn(move |new_scope| {
-                        hasher_function_with_nice_gyatt(path, prefix_len, error_tx, hash_tx);
-                    });
-                }
-            } else if metadata.is_dir() {
-                let error_rx = error_rx.clone();
-                let error_tx = error_tx.clone();
-                let hash_tx = hash_tx.clone();
-                scope.spawn(move |new_scope| {
-                    this_is_a_gyatt_function(
-                        path, prefix_len, error_rx, error_tx, hash_tx, new_scope,
-                    )
-                });
-            }
-        }
-    }
-
-    let (hash_tx, hash_rx) = crossbeam_channel::unbounded::<HashedFile>();
-    let (error_tx, error_rx) = crossbeam_channel::unbounded::<io::Error>();
-
-    // This **must** be cloned before being passed into the scope.
-    // Otherwise `error_rx` will be moved into the scope and dropped when it
-    // ends, causing our upcoming `recv` call to block indefinitely.
-    let error_rx_clone = error_rx.clone();
-    rayon::scope(move |scope| {
-        this_is_a_gyatt_function(
-            dir_path.to_path_buf(),
-            prefix_len,
-            error_rx_clone,
-            error_tx,
-            hash_tx,
-            scope,
-        );
-    });
-
-    match error_rx.recv() {
-        Err(_) => Ok(hash_rx.into_iter().collect()),
-        Ok(e) => Err(e),
-    }
-}*/

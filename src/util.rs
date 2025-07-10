@@ -1,5 +1,5 @@
 use crate::IOResult;
-use crate::fs::*;
+use crate::fs::get_file_paths;
 use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
@@ -47,7 +47,7 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
     let prefix_len = dir_path.len() + 1;
 
     let start = std::time::Instant::now();
-    let mut file_list = get_files(dir_path.into())?;
+    let mut file_list = get_file_paths(dir_path.into())?;
     let delta = std::time::Instant::now()
         .duration_since(start)
         .as_secs_f64();
