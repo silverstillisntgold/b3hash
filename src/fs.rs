@@ -1,9 +1,52 @@
 use crate::IOResult;
 use camino::Utf8PathBuf;
-use crossbeam_channel::{Receiver, Sender};
 use std::io;
+use std::sync::{Arc, Mutex};
 
+const CAPACITY_ERRORS: usize = 1 << 4;
+const CAPACITY_PATHS: usize = 1 << 20;
+const CAPACITY_TMP_PATHS: usize = 1 << 8;
 const HIDDEN_ENTRY_PREFIX: char = '.';
+
+struct ArcVec<T> {
+    inner: Arc<Mutex<Vec<T>>>,
+}
+
+impl<T> Clone for ArcVec<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        let inner = self.inner.clone();
+        Self { inner }
+    }
+}
+
+impl<T> ArcVec<T> {
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        let inner = Arc::new(Mutex::new(Vec::with_capacity(capacity)));
+        Self { inner }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
+    }
+
+    #[inline]
+    pub fn push(&mut self, value: T) {
+        self.inner.lock().unwrap().push(value);
+    }
+
+    #[inline]
+    pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
+        self.inner.lock().unwrap().extend(iter);
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> Vec<T> {
+        Arc::into_inner(self.inner).unwrap().into_inner().unwrap()
+    }
+}
 
 /// Build a `Vec` containing the paths of all visible files within `dir_path`.
 ///
@@ -16,38 +59,28 @@ const HIDDEN_ENTRY_PREFIX: char = '.';
 /// The ordering of paths in the returned `Vec` is non-deterministic.
 #[inline(never)]
 pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
-    let (path_tx, path_rx) = crossbeam_channel::unbounded::<Utf8PathBuf>();
-    let (error_tx, error_rx) = crossbeam_channel::unbounded::<io::Error>();
+    let errors = ArcVec::with_capacity(CAPACITY_ERRORS);
+    let paths = ArcVec::with_capacity(CAPACITY_PATHS);
 
-    // Need to pass a cloned instance into the scope, or the original
-    // `error_rx` will be dropped before we need to use it.
-    // This doesn't need to be done for the senders because we want them
-    // to be dropped/closed when all work is completed.
-    let error_rx_clone = error_rx.clone();
+    let errors_clone = errors.clone();
+    let paths_clone = paths.clone();
     rayon::in_place_scope(move |scope| {
-        this_is_a_gyatt_function(dir_path, error_rx_clone, error_tx, path_tx, scope);
+        this_is_a_gyatt_function(dir_path, errors_clone, paths_clone, scope);
     });
 
-    // No need to use blocking operations because both senders
-    // will have been dropped/closed by this point.
-    match error_rx.try_recv() {
-        // An `Err` here indicates that our error channel
-        // is empty, which is what we want.
-        Err(_) => Ok(path_rx.try_iter().collect()),
-        Ok(e) => Err(e),
+    // If there are any errors, we only worry about the first one.
+    match errors.into_inner().into_iter().nth(0) {
+        None => Ok(paths.into_inner()),
+        Some(e) => Err(e),
     }
 }
 
-macro_rules! unwrap_or_send_error {
+macro_rules! unwrap_or_push_error {
     ($expr: expr, $err_chan: ident) => {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                // SAFETY: This operation will never fail, because the channel
-                // is unbounded and the receiver always outlives the sender.
-                unsafe {
-                    $err_chan.try_send(e).unwrap_unchecked();
-                }
+                $err_chan.push(e);
                 return;
             }
         }
@@ -56,39 +89,38 @@ macro_rules! unwrap_or_send_error {
 
 fn this_is_a_gyatt_function(
     dir_path: Utf8PathBuf,
-    error_rx: Receiver<io::Error>,
-    error_tx: Sender<io::Error>,
-    path_tx: Sender<Utf8PathBuf>,
+    mut errors: ArcVec<io::Error>,
+    mut paths: ArcVec<Utf8PathBuf>,
     scope: &rayon::Scope,
 ) {
-    let entries = unwrap_or_send_error!(dir_path.read_dir_utf8(), error_tx);
+    // Terminate early if some other worker already pushed an error.
+    if !errors.is_empty() {
+        return;
+    }
+    let entries = unwrap_or_push_error!(dir_path.read_dir_utf8(), errors);
+    // We push all file paths in the current directory into a local array,
+    // then before exiting the function we move this data to our shared `paths`.
+    // This, along with the initial `VecArc::is_empty` check, means that
+    // we only ever lock each of the `ArcVec` instances once per function.
+    let mut tmp_paths = Vec::with_capacity(CAPACITY_TMP_PATHS);
     for entry in entries {
-        // Terminate early if some other worker has
-        // already sent out an error.
-        if !error_rx.is_empty() {
-            return;
-        }
-        let entry = unwrap_or_send_error!(entry, error_tx);
+        let entry = unwrap_or_push_error!(entry, errors);
         if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) {
             continue;
         }
-        let metadata = unwrap_or_send_error!(entry.metadata(), error_tx);
+        let metadata = unwrap_or_push_error!(entry.metadata(), errors);
         let path = entry.into_path();
         if metadata.is_file() {
             if metadata.len() > 0 {
-                // SAFETY: This operation will never fail, because the channel
-                // is unbounded and the receiver always outlives the sender.
-                unsafe {
-                    path_tx.try_send(path).unwrap_unchecked();
-                }
+                tmp_paths.push(path);
             }
         } else if metadata.is_dir() {
-            let error_rx = error_rx.clone();
-            let error_tx = error_tx.clone();
-            let path_tx = path_tx.clone();
+            let errors_clone = errors.clone();
+            let paths_clone = paths.clone();
             scope.spawn(move |new_scope| {
-                this_is_a_gyatt_function(path, error_rx, error_tx, path_tx, new_scope)
+                this_is_a_gyatt_function(path, errors_clone, paths_clone, new_scope);
             });
         }
     }
+    paths.extend(tmp_paths);
 }
