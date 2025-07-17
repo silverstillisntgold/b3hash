@@ -11,13 +11,12 @@ pub struct HashedFileV2 {
     pub size: u64,
 }
 
-pub struct FileHasher;
+impl TryFrom<Utf8PathBuf> for HashedFileV2 {
+    type Error = std::io::Error;
 
-impl FileHasher {
-    #[inline]
-    pub fn run(path: Utf8PathBuf) -> IOResult<HashedFileV2> {
-        let path_ref = path.as_std_path();
-        let file_reader = File::open(path_ref)?;
+    fn try_from(value: Utf8PathBuf) -> Result<Self, Self::Error> {
+        let path = value;
+        let file_reader = File::open(path.as_std_path())?;
         let mut hasher = Hasher::new();
         hasher.update_reader(file_reader)?;
         let hash = hasher.finalize();

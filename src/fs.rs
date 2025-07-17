@@ -1,57 +1,11 @@
 use crate::IOResult;
+use crate::arcvec::ArcVec;
 use camino::Utf8PathBuf;
 use std::io;
-use std::sync::{Arc, Mutex};
 
 const CAPACITY_PATHS: usize = 1 << 20;
 const CAPACITY_TMP_PATHS: usize = 1 << 8;
 const HIDDEN_ENTRY_PREFIX: char = '.';
-
-struct ArcVec<T> {
-    inner: Arc<Mutex<Vec<T>>>,
-}
-
-impl<T> Clone for ArcVec<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        let inner = self.inner.clone();
-        Self { inner }
-    }
-}
-
-impl<T> ArcVec<T> {
-    #[inline]
-    pub fn new() -> Self {
-        let inner = Arc::new(Mutex::new(Vec::new()));
-        Self { inner }
-    }
-
-    #[inline]
-    pub fn with_capacity(capacity: usize) -> Self {
-        let inner = Arc::new(Mutex::new(Vec::with_capacity(capacity)));
-        Self { inner }
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.inner.lock().unwrap().is_empty()
-    }
-
-    #[inline]
-    pub fn push(&mut self, value: T) {
-        self.inner.lock().unwrap().push(value);
-    }
-
-    #[inline]
-    pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
-        self.inner.lock().unwrap().extend(iter);
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> Vec<T> {
-        Arc::into_inner(self.inner).unwrap().into_inner().unwrap()
-    }
-}
 
 /// Build a `Vec` containing the paths of all visible files within `dir_path`.
 ///
@@ -66,7 +20,6 @@ impl<T> ArcVec<T> {
 /// The ordering of paths in the returned `Vec` is non-deterministic.
 #[inline(never)]
 pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
-    // Encountering errors is the slow path, so don't bother preallocating memory.
     let errors = ArcVec::new();
     let paths = ArcVec::with_capacity(CAPACITY_PATHS);
 
@@ -95,6 +48,7 @@ macro_rules! unwrap_or_push_error {
     };
 }
 
+#[inline(never)]
 fn this_is_a_gyatt_function(
     dir_path: Utf8PathBuf,
     mut errors: ArcVec<io::Error>,
