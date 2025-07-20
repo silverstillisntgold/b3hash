@@ -51,8 +51,8 @@ macro_rules! unwrap_or_push_error {
 #[inline(never)]
 fn this_is_a_gyatt_function(
     dir_path: Utf8PathBuf,
-    mut errors: ArcVec<io::Error>,
-    mut paths: ArcVec<Utf8PathBuf>,
+    errors: ArcVec<io::Error>,
+    paths: ArcVec<Utf8PathBuf>,
     scope: &rayon::Scope,
 ) {
     // Terminate early if some other worker(s) already pushed an error.

@@ -5,7 +5,7 @@ A crate for creating/validating directory tree hashfiles.
 */
 
 mod arcvec;
-pub mod fs;
+mod fs;
 mod types;
 mod util;
 

@@ -9,11 +9,10 @@ use std::io::{Error, ErrorKind};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
-const REPLACEMENT: char = '/';
-const WINDOWS_MOMENT: char = '\\';
 
-/// Convenience method for calling a function inside one-time
+/// Convenience function for calling a function inside one-time
 /// usage rayon threadpool with a custom number of threads.
+#[inline]
 pub fn with_threads<F, R>(num_threads: usize, func: F) -> R
 where
     F: FnOnce() -> R + Send,
@@ -85,12 +84,9 @@ pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
 #[inline]
 fn oi_vei(s: &str) -> String {
     if cfg!(windows) {
-        s.chars()
-            .map(|c| match c == WINDOWS_MOMENT {
-                false => c,
-                true => REPLACEMENT,
-            })
-            .collect()
+        // Codegen for this shit is actually insanely good.
+        // Also fuck windows.
+        s.replace('\\', "/")
     } else {
         s.to_string()
     }

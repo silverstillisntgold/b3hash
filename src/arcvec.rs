@@ -7,8 +7,7 @@ pub struct ArcVec<T> {
 }
 
 impl<T> Clone for ArcVec<T> {
-    /// Makes a clone of the internal `Arc` pointer,
-    /// increasing the strong reference count.
+    /// Makes a clone of the internal `Arc` pointer, increasing the strong reference count.
     #[inline]
     fn clone(&self) -> Self {
         let inner = self.inner.clone();
@@ -17,10 +16,10 @@ impl<T> Clone for ArcVec<T> {
 }
 
 impl<T> ArcVec<T> {
-    /// Create a new [`ArcVec`] with a small default allocation.
+    /// Create a new `ArcVec` with a small default allocation.
     #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(1)
+        Self::with_capacity(4)
     }
 
     /// Call [`Vec::with_capacity`] with `capacity`.
@@ -38,13 +37,13 @@ impl<T> ArcVec<T> {
 
     /// Call [`Vec::push`] with `value` after locking `self`.
     #[inline]
-    pub fn push(&mut self, value: T) {
+    pub fn push(&self, value: T) {
         self.inner.lock().unwrap().push(value);
     }
 
     /// Call [`Vec::extend`] with `iter` after locking `self`.
     #[inline]
-    pub fn extend(&mut self, iter: impl IntoIterator<Item = T>) {
+    pub fn extend(&self, iter: impl IntoIterator<Item = T>) {
         self.inner.lock().unwrap().extend(iter);
     }
 
