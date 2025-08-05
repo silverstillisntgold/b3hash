@@ -18,18 +18,18 @@ fn main() -> std::io::Result<()> {
     //let r = r?;
     //println!("time: {:.2} seconds || len: {}", t, r.len());
 
-    //let (res, t) = time(|| b3hash::create_hashfile(&path));
-    //let _ = res?;
-    //println!("Execution time: {:.2}", t);
+    /*let (res, t) = time(|| b3hash::create_hashfile(&path));
+    let _ = res?;
+    println!("Execution time: {:.2}", t);
 
-    /*let (res, t) = time(|| b3hash::validate_hashfile(&path));
+    let (res, t) = time(|| b3hash::validate_hashfile(&path));
     let res = res?;
     if res.is_none() {
         println!("all files validated");
         println!("time: {:.2}", t);
     } else {
-        println!("validation failed:");
-        println!("files failes: {}", res.unwrap().len());
+        print!("validation failed, ");
+        println!("files failed: {}", res.unwrap().len());
     }*/
 
     let (res, t) = time(|| b3hash::hash_directory(&path));

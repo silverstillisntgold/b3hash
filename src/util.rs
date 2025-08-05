@@ -1,11 +1,10 @@
-use crate::IOResult;
 use crate::fs::get_file_paths;
 use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::Utf8Path;
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind};
 
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
@@ -38,27 +37,22 @@ where
 /// depending on it's size. Both of these processes use memory mapping.
 /// Internally, memory mapping will allocate a small buffer instead of
 /// mapping when the file is approximately too small to benefit from it.
-pub fn hash_files(dir_path: &str) -> IOResult<Vec<HashedFile>> {
-    // One more than the actual length because we don't want
-    // stripped file paths to start with a slash.
-    // Both slash types are just ascii (a single byte in utf8),
-    // so this still lands on a valid utf8 boundary.
-    let prefix_len = dir_path.len() + 1;
+pub fn hash_files(dir_path: &str) -> io::Result<Vec<HashedFile>> {
+    let prefix_len = if dir_path.ends_with('/') || dir_path.ends_with('\\') {
+        dir_path.len()
+    } else {
+        dir_path.len() + 1
+    };
 
-    let start = std::time::Instant::now();
     let mut file_list = get_file_paths(dir_path.into())?;
-    let delta = std::time::Instant::now()
-        .duration_since(start)
-        .as_secs_f64();
-    println!(
-        "Time to collect {} files: {:.2} seconds",
-        file_list.len(),
-        delta
-    );
-    // It's more efficient for sorting to be done here,
+    // It's most efficient for sorting to be done here,
     // since `Utf8PathBuf` is effectively just a `String`,
     // and is faster to sort than `HashedFile`.
-    file_list.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+    file_list.sort_unstable_by(|a, b| {
+        let a_stripped = unsafe { a.as_str().get_unchecked(prefix_len..) };
+        let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
+        a_stripped.cmp(b_stripped)
+    });
 
     file_list
         .into_par_iter()
@@ -122,7 +116,7 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 /// Since each line contains both the file path relative to `dir_path`
 /// and the hash for said file, upon successfully parsing each line we
 /// can immediately hash the associated file and compare hashes.
-pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>> {
+pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> io::Result<Vec<String>> {
     // Caller may actually see these paths when files fail validation or errors
     // are returned, so we override windows retardation if it exists.
     let dir_path_frfr = oi_vei(dir_path);
@@ -153,18 +147,20 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
                         let path = Utf8Path::new(dir_path).join(file_path);
                         match path.try_exists() {
                             Ok(true) => {
-                                let file = File::open(path.as_std_path()).unwrap();
-                                match Hasher::new().update_reader(file) {
-                                    Ok(hasher) => {
-                                        let new_hash = hasher.finalize();
-                                        match hash_eq(&old_hash, &new_hash) {
-                                            true => None,
-                                            // File exists but it's hash is incorrect:
-                                            // IT'S CORRUPTED OH NO.
-                                            false => Some(Ok(path.into_string())),
+                                match File::open(path.as_std_path()) {
+                                    Ok(file) => {
+                                        match Hasher::new().update_reader(file) {
+                                            Ok(hasher) => {
+                                                let new_hash = hasher.finalize();
+                                                match hash_eq(&old_hash, &new_hash) {
+                                                    true => None,
+                                                    // Corrupted file.
+                                                    false => Some(Ok(path.into_string())),
+                                                }
+                                            }
+                                            Err(e) => Some(Err(e)),
                                         }
                                     }
-                                    // I have zero clue when this would ever trigger.
                                     Err(e) => Some(Err(e)),
                                 }
                             }
@@ -180,8 +176,7 @@ pub fn validate_data(dir_path: &str, old_data: Vec<u8>) -> IOResult<Vec<String>>
                     // HexError needs to be explicitly converted to IOError.
                     Err(e) => Some(Err(Error::new(ErrorKind::InvalidData, e))),
                 },
-                // Delimiter wasn't found on current line (how tf???)
-                // so we cancel verification and propagate an error.
+                // Delimiter wasn't found on current line (how tf??).
                 None => Some(Err(Error::new(
                     ErrorKind::InvalidInput,
                     format!(

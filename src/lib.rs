@@ -10,17 +10,15 @@ mod types;
 mod util;
 
 use blake3::Hasher;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
+use std::io;
 use types::HashedDirectory;
 use util::*;
-
-/// Convenience type for `std::io::Result`.
-pub type IOResult<Type> = std::io::Result<Type>;
 
 pub const HASH_RESULTS_FILENAME: &str = ".b3hash";
 
 /// TODO: docs
-pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
+pub fn hash_directory(dir_path: &str) -> io::Result<HashedDirectory> {
     // It is absolutely critical that the returned Vec always
     // returns the same ordering of file hashes, given the same root
     // directory. Otherwise, the overall directory hash will be random.
@@ -30,7 +28,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
     let mut total_bytes_hashed = 0;
     let mut hasher = Hasher::new();
 
-    // It's slightly faster to fold the bytes of each file's hash and name
+    // It's slightly faster to fold the bytes of each file's hash
     // into a Vec<u8>, then hash that, because the hasher is able to use
     // vector instructions more consistently on larger [u8]'s.
     // But the difference is insignificant for small directories,
@@ -46,7 +44,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
         name: Utf8Path::new(dir_path)
             .file_name()
             .unwrap_or(dir_path)
-            .to_string(),
+            .to_owned(),
         files: hashed_files,
         hash: hasher.finalize(),
         size: total_bytes_hashed,
@@ -54,7 +52,7 @@ pub fn hash_directory(dir_path: &str) -> IOResult<HashedDirectory> {
 }
 
 /// TODO: docs
-pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
+pub fn create_hashfile(dir_path: &str) -> io::Result<()> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let hashed_files = hash_files(dir_path)?;
     let data = serialize_hashed_files(hashed_files);
@@ -63,7 +61,7 @@ pub fn create_hashfile(dir_path: &str) -> IOResult<()> {
 }
 
 /// TODO: docs
-pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
+pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
     let data = std::fs::read(hashfile_path)?;
     let failed_files = validate_data(dir_path, data)?;
@@ -75,18 +73,24 @@ pub fn validate_hashfile(dir_path: &str) -> IOResult<Option<Vec<String>>> {
     })
 }
 
+/// TODO: docs
+pub fn validate_files(file_list: Vec<Utf8PathBuf>) -> io::Result<Option<Vec<String>>> {
+    let _ = file_list;
+    todo!()
+}
+
 /// Alias for `hash_directory`, but using a local rayon
 /// threadpool with `num_threads` threads.
 pub fn hash_directory_with_threads(
     dir_path: &str,
     num_threads: usize,
-) -> IOResult<HashedDirectory> {
+) -> io::Result<HashedDirectory> {
     with_threads(num_threads, || hash_directory(dir_path))
 }
 
 /// Alias for `create_hashfile`, but using a local rayon
 /// threadpool with `num_threads` threads.
-pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IOResult<()> {
+pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> io::Result<()> {
     with_threads(num_threads, || create_hashfile(dir_path))
 }
 
@@ -95,6 +99,6 @@ pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> IORes
 pub fn validate_hashfile_with_threads(
     dir_path: &str,
     num_threads: usize,
-) -> IOResult<Option<Vec<String>>> {
+) -> io::Result<Option<Vec<String>>> {
     with_threads(num_threads, || validate_hashfile(dir_path))
 }

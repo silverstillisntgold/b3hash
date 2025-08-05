@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 blake3 = "1.8"
 camino = "1.1"
+globset = { version = "0.4", default-features = false }
 rayon = "1.10"
