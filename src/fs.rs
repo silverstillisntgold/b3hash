@@ -1,32 +1,51 @@
-use crate::IOResult;
 use crate::arcvec::ArcVec;
-use camino::Utf8PathBuf;
-use std::io;
+use camino::{Utf8Path, Utf8PathBuf};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::{fs, io};
 
 const CAPACITY_PATHS: usize = 1 << 20;
 const CAPACITY_TMP_PATHS: usize = 1 << 8;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 
+fn get_ignore_list(dir_path: &Utf8Path) -> io::Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    match fs::read_to_string(dir_path.join(".gitignore")) {
+        Ok(s) => {
+            s.trim()
+                .lines()
+                .filter(|s| !s.is_empty() && !s.starts_with('#'))
+                .map(|s| s.trim())
+                .for_each(|glob| match Glob::new(glob) {
+                    Ok(pat) => {
+                        builder.add(pat);
+                    }
+                    // Ignore glob building failures because I D N G A F.
+                    Err(_) => {}
+                });
+        }
+        Err(e) => match e.kind() {
+            // It's fine if there's no ignore file.
+            io::ErrorKind::NotFound => {}
+            _ => return Err(e),
+        },
+    };
+    Ok(builder.build().unwrap_or_default())
+}
+
 /// Build a `Vec` containing the paths of all visible files within `dir_path`.
-///
-/// This is done in such a way that each directory spawns a distinct rayon task,
-/// and is in charge of handling all the files and folders within it.
-/// Files are cached in a local `Vec`, then appended to a shared `ArcVec` before
-/// returning, while folders are dispatched to their own scope.
-/// Errors have their own `ArcVec`, and after one thread has encountered and
-/// subsequently pushed an error, all future directory scopes will immediately
-/// terminate and the first error found will be propaged to the caller.
 ///
 /// The ordering of paths in the returned `Vec` is non-deterministic.
 #[inline(never)]
-pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
+pub fn get_file_paths(dir_path: Utf8PathBuf) -> io::Result<Vec<Utf8PathBuf>> {
     let errors = ArcVec::new();
+    let ignore_list = get_ignore_list(&dir_path)?;
     let paths = ArcVec::with_capacity(CAPACITY_PATHS);
 
     let errors_clone = errors.clone();
+    let ignore_list_ref = &ignore_list;
     let paths_clone = paths.clone();
     rayon::in_place_scope(move |scope| {
-        this_is_a_gyatt_function(dir_path, errors_clone, paths_clone, scope);
+        this_is_a_gyatt_function(dir_path, errors_clone, ignore_list_ref, paths_clone, scope);
     });
 
     // If there are any errors, we only care about the first one.
@@ -37,11 +56,11 @@ pub fn get_file_paths(dir_path: Utf8PathBuf) -> IOResult<Vec<Utf8PathBuf>> {
 }
 
 macro_rules! unwrap_or_push_error {
-    ($expr: expr, $err_chan: ident) => {
+    ($expr: expr, $err_chan_desu: ident) => {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                $err_chan.push(e);
+                $err_chan_desu.push(e);
                 return;
             }
         }
@@ -49,11 +68,12 @@ macro_rules! unwrap_or_push_error {
 }
 
 #[inline(never)]
-fn this_is_a_gyatt_function(
+fn this_is_a_gyatt_function<'a>(
     dir_path: Utf8PathBuf,
     errors: ArcVec<io::Error>,
+    ignore_list: &'a GlobSet,
     paths: ArcVec<Utf8PathBuf>,
-    scope: &rayon::Scope,
+    scope: &rayon::Scope<'a>,
 ) {
     // Terminate early if some other worker(s) already pushed an error.
     if !errors.is_empty() {
@@ -61,18 +81,21 @@ fn this_is_a_gyatt_function(
     }
     let entries = unwrap_or_push_error!(dir_path.read_dir_utf8(), errors);
     // Each directory maintains it's own cache of file paths, which will
-    // be moved into the shared `paths` after all entries in this directory
-    // have been handled. This ensures that each spawned scope will only ever
+    // be moved into the shared `paths` after all entries in the directory
+    // have been processed. This ensures that each spawned scope will only ever
     // hold a lock on `paths` once, minimizing lock contention.
     let mut tmp_paths = Vec::with_capacity(CAPACITY_TMP_PATHS);
     for entry in entries {
         let entry = unwrap_or_push_error!(entry, errors);
-        if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) {
+        if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX)
+            || ignore_list.is_match(entry.path().as_std_path())
+        {
             continue;
         }
         let metadata = unwrap_or_push_error!(entry.metadata(), errors);
         let path = entry.into_path();
         if metadata.is_file() {
+            // Don't bother appending empty files.
             if metadata.len() > 0 {
                 tmp_paths.push(path);
             }
@@ -80,7 +103,7 @@ fn this_is_a_gyatt_function(
             let errors_clone = errors.clone();
             let paths_clone = paths.clone();
             scope.spawn(move |new_scope| {
-                this_is_a_gyatt_function(path, errors_clone, paths_clone, new_scope);
+                this_is_a_gyatt_function(path, errors_clone, ignore_list, paths_clone, new_scope);
             });
         }
     }
