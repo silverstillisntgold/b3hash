@@ -9,21 +9,6 @@ use std::io::{self, Error, ErrorKind};
 const DELIM: char = ' ';
 const NEWLINE: char = '\n';
 
-/// Convenience function for calling a function inside one-time
-/// usage rayon threadpool with a custom number of threads.
-#[inline]
-pub fn with_threads<F, R>(num_threads: usize, func: F) -> R
-where
-    F: FnOnce() -> R + Send,
-    R: Send,
-{
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        .expect("initializing unique threadpools should never fail")
-        .install(func)
-}
-
 /// Builds a `Vec` by hashing all visible files beneath `dir_path`.
 /// The returned `Vec` is always sorted by file path.
 ///
@@ -47,8 +32,13 @@ pub fn hash_files(dir_path: &str) -> io::Result<Vec<HashedFile>> {
     let mut file_list = get_file_paths(dir_path.into())?;
     // It's most efficient for sorting to be done here,
     // since `Utf8PathBuf` is effectively just a `String`,
-    // and is faster to sort than `HashedFile`.
+    // and is much faster to sort than `HashedFile`.
     file_list.sort_unstable_by(|a, b| {
+        // We don't know how long the given prefix will be, so it's best
+        // to strip it out to minimize the time spent sorting.
+        //
+        // SAFETY: Since all files are descendants of dir_path,
+        // they all have dir_path as a prefix.
         let a_stripped = unsafe { a.as_str().get_unchecked(prefix_len..) };
         let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
         a_stripped.cmp(b_stripped)
@@ -106,7 +96,6 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
         })
 }
 
-/// Can't just be unwrapping that shit man.
 pub fn parse_old_data(old_data: Vec<u8>) -> io::Result<Vec<(Hash, Utf8PathBuf)>> {
     fn parse_line(line: &str) -> io::Result<(Hash, Utf8PathBuf)> {
         let (hash, path) = line.split_once(DELIM).unwrap();

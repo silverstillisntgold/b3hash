@@ -6,15 +6,19 @@ use std::{fs, io};
 const CAPACITY_PATHS: usize = 1 << 20;
 const CAPACITY_TMP_PATHS: usize = 1 << 8;
 const HIDDEN_ENTRY_PREFIX: char = '.';
+const IGNOREFILE_COMMENT: char = '#';
+const IGNOREFILE_TARGET: &str = ".gitignore";
 
+/// Constructs a [`GlobSet`] for ignoring files/directories using the local ignore file.
 fn get_ignore_list(dir_path: &Utf8Path) -> io::Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
-    match fs::read_to_string(dir_path.join(".gitignore")) {
+    let ignore_path = dir_path.join(IGNOREFILE_TARGET);
+    match fs::read_to_string(ignore_path) {
         Ok(s) => {
             s.trim()
                 .lines()
-                .filter(|s| !s.is_empty() && !s.starts_with('#'))
-                .map(|s| s.trim())
+                .map(str::trim)
+                .filter(|s| s.chars().next().is_some_and(|s| s != IGNOREFILE_COMMENT))
                 .for_each(|glob| {
                     // Ignore glob building failures.
                     if let Ok(pat) = Glob::new(glob) {
@@ -23,15 +27,15 @@ fn get_ignore_list(dir_path: &Utf8Path) -> io::Result<GlobSet> {
                 });
         }
         Err(e) => match e.kind() {
-            // It's fine if there's no ignore file.
-            io::ErrorKind::NotFound => {}
+            // It's fine if there isn't an ignore file.
+            io::ErrorKind::NotFound => (),
             _ => return Err(e),
         },
     };
     Ok(builder.build().unwrap_or_default())
 }
 
-/// Build a `Vec` containing the paths of all visible files within `dir_path`.
+/// Builds a `Vec` containing the paths of all visible files within `dir_path`.
 ///
 /// The ordering of paths in the returned `Vec` is non-deterministic.
 #[inline(never)]
@@ -66,6 +70,11 @@ macro_rules! unwrap_or_push_error {
     };
 }
 
+/// Pushes all file paths within `dir_path` into `paths` and spawns new parallel
+/// instances of itself for each subdirectory.
+///
+/// If any errors are encountered they're appended to `errors` and no further
+/// directories will be scanned.
 #[inline(never)]
 fn this_is_a_gyatt_function<'a>(
     dir_path: Utf8PathBuf,
@@ -74,7 +83,7 @@ fn this_is_a_gyatt_function<'a>(
     paths: ArcVec<Utf8PathBuf>,
     scope: &rayon::Scope<'a>,
 ) {
-    // Terminate early if some other worker(s) already pushed an error.
+    // Terminate early if some other worker has already pushed an error.
     if !errors.is_empty() {
         return;
     }
@@ -86,15 +95,13 @@ fn this_is_a_gyatt_function<'a>(
     let mut tmp_paths = Vec::with_capacity(CAPACITY_TMP_PATHS);
     for entry in entries {
         let entry = unwrap_or_push_error!(entry, errors);
-        if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX)
-            || ignore_list.is_match(entry.path().as_std_path())
+        if entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX) || ignore_list.is_match(entry.path())
         {
             continue;
         }
         let metadata = unwrap_or_push_error!(entry.metadata(), errors);
         let path = entry.into_path();
         if metadata.is_file() {
-            // Don't bother appending empty files.
             if metadata.len() > 0 {
                 tmp_paths.push(path);
             }

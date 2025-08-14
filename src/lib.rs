@@ -4,8 +4,6 @@
 A crate for creating/validating directory tree hashfiles.
 */
 
-#![deny(missing_docs)]
-
 mod arcvec;
 mod fs;
 mod types;
@@ -77,31 +75,30 @@ pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
 }
 
 /// TODO: docs
+pub fn validate_hashfile_v2(dir_path: &str) -> io::Result<Option<Vec<Utf8PathBuf>>> {
+    let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
+    let data = std::fs::read(hashfile_path)?;
+    _ = data;
+    let file_list = vec![];
+    validate_files(file_list)
+}
+
+/// TODO: docs
 pub fn validate_files(file_list: Vec<Utf8PathBuf>) -> io::Result<Option<Vec<Utf8PathBuf>>> {
     let _ = file_list;
     todo!()
 }
 
-/// Alias for `hash_directory`, but using a local rayon
-/// threadpool with `num_threads` threads.
-pub fn hash_directory_with_threads(
-    dir_path: &str,
-    num_threads: usize,
-) -> io::Result<HashedDirectory> {
-    with_threads(num_threads, || hash_directory(dir_path))
-}
-
-/// Alias for `create_hashfile`, but using a local rayon
-/// threadpool with `num_threads` threads.
-pub fn create_hashfile_with_threads(dir_path: &str, num_threads: usize) -> io::Result<()> {
-    with_threads(num_threads, || create_hashfile(dir_path))
-}
-
-/// Alias for `validate_hashfile`, but using a local rayon
-/// threadpool with `num_threads` threads.
-pub fn validate_hashfile_with_threads(
-    dir_path: &str,
-    num_threads: usize,
-) -> io::Result<Option<Vec<String>>> {
-    with_threads(num_threads, || validate_hashfile(dir_path))
+/// Convenience function for calling a function inside one-time
+/// usage rayon threadpool with a custom number of threads.
+pub fn with_threads<F, R>(num_threads: usize, func: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .expect("initializing unique threadpools should never fail")
+        .install(func)
 }
