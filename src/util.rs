@@ -1,7 +1,7 @@
 use crate::fs::get_file_paths;
 use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{self, Error, ErrorKind};
@@ -67,7 +67,7 @@ pub fn hash_files(dir_path: &str) -> io::Result<Vec<HashedFile>> {
             let stripped_file_path = unsafe { file.as_str().get_unchecked(prefix_len..) };
             Ok(HashedFile {
                 hash: hasher.finalize(),
-                path: oi_vei(stripped_file_path),
+                path: oi_vei(stripped_file_path).into(),
                 size: hasher.count(),
             })
         })
@@ -89,9 +89,6 @@ fn oi_vei(s: &str) -> String {
 /// Collapses data from `hashed_files` into a `Vec` of bytes. This data
 /// represents a newline-deliniated `String` containing pairs of hashes
 /// and the file paths from which they were derived.
-///
-/// It's possible to parallelize this operation, using `rayon::flat_map`,
-/// but doing so regresses performance significantly.
 pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
     /// 32MiB pre-allocation.
     const STARTING_CAP: usize = 1 << 25;
@@ -103,10 +100,25 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
             // The char constants used are represented as ascii values,
             // so forcing them into u8's and pushing them is fine.
             buf.push(DELIM as u8);
-            buf.extend_from_slice(file.path.as_bytes());
+            buf.extend_from_slice(file.path.as_str().as_bytes());
             buf.push(NEWLINE as u8);
             buf
         })
+}
+
+/// Can't just be unwrapping that shit man.
+pub fn parse_old_data(old_data: Vec<u8>) -> io::Result<Vec<(Hash, Utf8PathBuf)>> {
+    fn parse_line(line: &str) -> io::Result<(Hash, Utf8PathBuf)> {
+        let (hash, path) = line.split_once(DELIM).unwrap();
+        let hash = Hash::from_hex(hash).unwrap();
+        let path = Utf8PathBuf::from(path);
+        Ok((hash, path))
+    }
+
+    unsafe { String::from_utf8_unchecked(old_data) }
+        .lines()
+        .map(parse_line)
+        .collect()
 }
 
 /// Simultaneously parses **and** validates file hashes from `old_data`,

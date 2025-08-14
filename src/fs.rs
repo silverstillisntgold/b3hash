@@ -15,12 +15,11 @@ fn get_ignore_list(dir_path: &Utf8Path) -> io::Result<GlobSet> {
                 .lines()
                 .filter(|s| !s.is_empty() && !s.starts_with('#'))
                 .map(|s| s.trim())
-                .for_each(|glob| match Glob::new(glob) {
-                    Ok(pat) => {
+                .for_each(|glob| {
+                    // Ignore glob building failures.
+                    if let Ok(pat) = Glob::new(glob) {
                         builder.add(pat);
                     }
-                    // Ignore glob building failures because I D N G A F.
-                    Err(_) => {}
                 });
         }
         Err(e) => match e.kind() {
@@ -49,7 +48,7 @@ pub fn get_file_paths(dir_path: Utf8PathBuf) -> io::Result<Vec<Utf8PathBuf>> {
     });
 
     // If there are any errors, we only care about the first one.
-    match errors.into_inner().into_iter().nth(0) {
+    match errors.into_inner().into_iter().next() {
         None => Ok(paths.into_inner()),
         Some(e) => Err(e),
     }

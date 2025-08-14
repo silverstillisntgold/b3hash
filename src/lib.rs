@@ -4,6 +4,8 @@
 A crate for creating/validating directory tree hashfiles.
 */
 
+#![deny(missing_docs)]
+
 mod arcvec;
 mod fs;
 mod types;
@@ -15,7 +17,8 @@ use std::io;
 use types::HashedDirectory;
 use util::*;
 
-pub const HASH_RESULTS_FILENAME: &str = ".b3hash";
+/// TODO: docs
+pub const HASH_RESULTS_FILENAME: &str = ".b3hash_v0";
 
 /// TODO: docs
 pub fn hash_directory(dir_path: &str) -> io::Result<HashedDirectory> {
@@ -53,7 +56,7 @@ pub fn hash_directory(dir_path: &str) -> io::Result<HashedDirectory> {
 
 /// TODO: docs
 pub fn create_hashfile(dir_path: &str) -> io::Result<()> {
-    let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
+    let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
     let hashed_files = hash_files(dir_path)?;
     let data = serialize_hashed_files(hashed_files);
     std::fs::write(hashfile_path, data)?;
@@ -62,7 +65,7 @@ pub fn create_hashfile(dir_path: &str) -> io::Result<()> {
 
 /// TODO: docs
 pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
-    let hashfile_path = Utf8Path::new(".").join(HASH_RESULTS_FILENAME);
+    let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
     let data = std::fs::read(hashfile_path)?;
     let failed_files = validate_data(dir_path, data)?;
     // The length of failed_files is the amount
@@ -74,7 +77,7 @@ pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
 }
 
 /// TODO: docs
-pub fn validate_files(file_list: Vec<Utf8PathBuf>) -> io::Result<Option<Vec<String>>> {
+pub fn validate_files(file_list: Vec<Utf8PathBuf>) -> io::Result<Option<Vec<Utf8PathBuf>>> {
     let _ = file_list;
     todo!()
 }

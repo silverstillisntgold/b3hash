@@ -1,4 +1,5 @@
 use blake3::Hash;
+use camino::Utf8PathBuf;
 use std::ops::Deref;
 
 pub struct HashedDirectory {
@@ -20,7 +21,7 @@ impl Deref for HashedDirectory {
 
 pub struct HashedFile {
     pub hash: Hash,
-    pub path: String,
+    pub path: Utf8PathBuf,
     pub size: u64,
 }
 
