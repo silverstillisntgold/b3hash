@@ -4,8 +4,10 @@
 A crate for creating/validating directory tree hashfiles.
 */
 
+#![allow(unused)]
+
 mod arcvec;
-mod fs;
+mod files;
 mod types;
 mod util;
 

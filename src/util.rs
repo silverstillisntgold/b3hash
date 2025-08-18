@@ -1,4 +1,4 @@
-use crate::fs::get_file_paths;
+use crate::files::get_file_paths;
 use crate::types::HashedFile;
 use blake3::{Hash, Hasher};
 use camino::{Utf8Path, Utf8PathBuf};
