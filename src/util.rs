@@ -98,14 +98,17 @@ pub fn serialize_hashed_files(hashed_files: Vec<HashedFile>) -> Vec<u8> {
 
 pub fn parse_old_data(old_data: Vec<u8>) -> io::Result<Vec<(Hash, Utf8PathBuf)>> {
     fn parse_line(line: &str) -> io::Result<(Hash, Utf8PathBuf)> {
-        let (hash, path) = line.split_once(DELIM).unwrap();
-        let hash = Hash::from_hex(hash).unwrap();
+        let (hash, path) = line
+            .split_once(DELIM)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "delimiter not found"))?;
+        let hash =
+            Hash::from_hex(hash).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let path = Utf8PathBuf::from(path);
         Ok((hash, path))
     }
 
     unsafe { String::from_utf8_unchecked(old_data) }
-        .lines()
+        .par_lines()
         .map(parse_line)
         .collect()
 }
