@@ -8,12 +8,13 @@ A crate for creating/validating directory tree hashfiles.
 
 mod arcvec;
 mod files;
+mod new;
 mod types;
 mod util;
 
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
-use std::io;
+use std::{fs, io};
 use types::HashedDirectory;
 use util::*;
 
@@ -59,14 +60,14 @@ pub fn create_hashfile(dir_path: &str) -> io::Result<()> {
     let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
     let hashed_files = hash_files(dir_path)?;
     let data = serialize_hashed_files(hashed_files);
-    std::fs::write(hashfile_path, data)?;
+    fs::write(hashfile_path, data)?;
     Ok(())
 }
 
 /// TODO: docs
 pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
     let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
-    let data = std::fs::read(hashfile_path)?;
+    let data = fs::read(hashfile_path)?;
     let failed_files = validate_data(dir_path, data)?;
     // The length of failed_files is the amount
     // of files that failed validation.
@@ -79,7 +80,7 @@ pub fn validate_hashfile(dir_path: &str) -> io::Result<Option<Vec<String>>> {
 /// TODO: docs
 pub fn validate_hashfile_v2(dir_path: &str) -> io::Result<Option<Vec<Utf8PathBuf>>> {
     let hashfile_path = Utf8Path::new(dir_path).join(HASH_RESULTS_FILENAME);
-    let data = std::fs::read(hashfile_path)?;
+    let data = fs::read(hashfile_path)?;
     _ = data;
     let file_list = vec![];
     validate_files(file_list)

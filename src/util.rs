@@ -113,6 +113,10 @@ pub fn parse_old_data(old_data: Vec<u8>) -> io::Result<Vec<(Hash, Utf8PathBuf)>>
         .collect()
 }
 
+pub fn yes(input: Vec<Utf8PathBuf>) -> ! {
+    todo!()
+}
+
 /// Simultaneously parses **and** validates file hashes from `old_data`,
 /// returning a list of file paths which failed validation, or returning
 /// early with an IO error.
