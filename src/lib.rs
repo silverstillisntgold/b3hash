@@ -42,21 +42,8 @@ pub struct Manifest {
     version: u64,
     dir_name: String,
     dir_hash: Hash,
-    dir_size: Option<u64>,
+    dir_size: u64,
     entries: Vec<Entry>,
-}
-
-impl Manifest {
-    pub fn dir_size(&mut self) -> u64 {
-        match self.dir_size {
-            Some(val) => val,
-            None => {
-                let dir_size = self.entries.iter().map(|e| e.size).sum();
-                self.dir_size = Some(dir_size);
-                dir_size
-            }
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -68,8 +55,11 @@ pub struct Entry {
 
 #[derive(Debug)]
 pub enum Event {
-    Something,
-    OrAnother,
+    FileDiscoveryStarted,
+    FileDiscoveryCompleted,
+    FileHashingStarted,
+    FileHashingCompleted,
+    FileHashed(Utf8PathBuf),
 }
 
 #[derive(Builder, Debug)]
@@ -79,9 +69,6 @@ pub struct DirectoryHasher {
     custom_ignore_source: Option<String>,
 
     num_threads: Option<NonZeroUsize>,
-
-    #[builder(default = false)]
-    follow_symlinks: bool,
 
     #[builder(default = true)]
     respect_hidden: bool,

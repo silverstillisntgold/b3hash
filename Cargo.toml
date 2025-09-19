@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 blake3 = { version = "1.8", features = ["serde"] }
 bon = "3.7"
-camino = { version = "1.1", features = ["serde1"] }
+camino = { version = "1.2", features = ["serde1"] }
 crossbeam-channel = "0.5"
 globset = { version = "0.4", default-features = false }
 rayon = "1.11"
