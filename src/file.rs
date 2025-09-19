@@ -29,7 +29,9 @@ macro_rules! unwrap_or_push_error_and_return {
                 // of the code guarantees that senders will always be alive longer
                 // than receivers, so being disconnected is impossible. And the channel's
                 // are both unbounded, so they can never be full.
-                unsafe { $err_chan_desu.try_send(e.into()).unwrap_unchecked() };
+                unsafe {
+                    $err_chan_desu.try_send(e.into()).unwrap_unchecked();
+                }
                 return;
             }
         }
