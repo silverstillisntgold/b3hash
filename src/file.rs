@@ -66,6 +66,11 @@ impl<'a> FileFinder<'a> {
     }
 
     /// Sometimes you just need to eat a carrot. Fuck I forgot to get carrots when I went to Aldi's.
+    ///
+    /// For directory `dir_path`, sends all file paths into `path_s`, spawns a new parallel instance for
+    /// all directories, and sends any errors encountered into `error_s`. Newly spawned instances will
+    /// terminate immediately if `error_s` contains any errors, but will finish working within their current
+    /// directory if an error is pushed in some other worker during their execution.
     fn im_the_carrot_king(
         &'a self,
         dir_path: Utf8PathBuf,
