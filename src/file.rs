@@ -1,4 +1,4 @@
-use crate::DirectoryHasher;
+use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::Sender;
 use globset::{Glob, GlobSet};
@@ -46,9 +46,9 @@ macro_rules! unwrap_or_push_error_and_return {
 
 impl<'a> FileFinder<'a> {
     #[inline(never)]
-    pub fn find(self) -> Result<Vec<Utf8PathBuf>, crate::Error> {
+    pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
         let ignore_list = self.build_ignore_list()?;
-        let (error_s, error_r) = crossbeam_channel::unbounded::<crate::Error>();
+        let (error_s, error_r) = crossbeam_channel::unbounded::<Error>();
         let (path_s, path_r) = crossbeam_channel::unbounded::<Utf8PathBuf>();
 
         let dir_path = self.directory_path.to_owned();
@@ -78,7 +78,7 @@ impl<'a> FileFinder<'a> {
         dir_path: Utf8PathBuf,
         scope: &rayon::Scope<'a>,
         ignore_list: &'a GlobSet,
-        error_s: Sender<crate::Error>,
+        error_s: Sender<Error>,
         path_s: Sender<Utf8PathBuf>,
     ) {
         // Kill procedure early if an error has already been encountered.
@@ -91,6 +91,7 @@ impl<'a> FileFinder<'a> {
             // Skip operating on an entry as soon as we have enough information to do so.
             if (self.respect_hidden && entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX))
                 || (self.respect_ignore && ignore_list.is_match(entry.path().as_std_path()))
+                || entry.file_name() == HASHFILE
             {
                 continue;
             }
@@ -122,10 +123,10 @@ impl<'a> FileFinder<'a> {
     }
 
     /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.
-    fn build_ignore_list(&self) -> Result<GlobSet, crate::Error> {
+    fn build_ignore_list(&self) -> Result<GlobSet, Error> {
         let mut builder = GlobSet::builder();
         if self.respect_ignore {
-            let ignore_file = self.custom_ignore_source.unwrap_or(crate::IGNOREFILE);
+            let ignore_file = self.custom_ignore_source.unwrap_or(IGNOREFILE);
             let ignore_path = self.directory_path.join(ignore_file);
             fs::read_to_string(ignore_path)?
                 .trim()
