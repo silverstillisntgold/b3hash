@@ -9,7 +9,7 @@ const IGNOREFILE_COMMENT: char = '#';
 
 pub struct FileFinder<'a> {
     directory_path: &'a Utf8Path,
-    custom_ignore_source: Option<&'a str>,
+    custom_ignore_source: Option<&'a Utf8Path>,
     respect_hidden: bool,
     respect_ignore: bool,
 }
@@ -126,7 +126,7 @@ impl<'a> FileFinder<'a> {
     fn build_ignore_list(&self) -> Result<GlobSet, Error> {
         let mut builder = GlobSet::builder();
         if self.respect_ignore {
-            let ignore_file = self.custom_ignore_source.unwrap_or(IGNOREFILE);
+            let ignore_file = self.custom_ignore_source.unwrap_or(IGNOREFILE.into());
             let ignore_path = self.directory_path.join(ignore_file);
             fs::read_to_string(ignore_path)?
                 .trim()
