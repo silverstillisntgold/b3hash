@@ -1,22 +1,28 @@
+use crate::DirectoryHasher;
 use camino::{Utf8Path, Utf8PathBuf};
-use crossbeam_channel::{Receiver, Sender};
-use globset::{Glob, GlobSet, GlobSetBuilder};
-use std::{fs, io};
+use crossbeam_channel::Sender;
+use globset::{Glob, GlobSet};
+use std::fs;
 
-const CAPACITY_PATHS: usize = 1 << 20;
-const CAPACITY_TMP_PATHS: usize = 1 << 8;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 const IGNOREFILE_COMMENT: char = '#';
 
-#[derive(bon::Builder)]
 pub struct FileFinder<'a> {
     directory_path: &'a Utf8Path,
-
     custom_ignore_source: Option<&'a str>,
-
     respect_hidden: bool,
-
     respect_ignore: bool,
+}
+
+impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
+    fn from(value: &'a DirectoryHasher) -> Self {
+        Self {
+            directory_path: value.directory_path.as_path(),
+            custom_ignore_source: value.custom_ignore_source.as_deref(),
+            respect_hidden: value.respect_hidden,
+            respect_ignore: value.respect_ignore,
+        }
+    }
 }
 
 macro_rules! unwrap_or_push_error_and_return {
@@ -26,8 +32,8 @@ macro_rules! unwrap_or_push_error_and_return {
             Err(e) => {
                 // SAFETY: Calls to `Sender::try_send` will only return an error if
                 // the channel being sent into is full or disconnected. The structure
-                // of the code guarantees that senders will always be alive longer
-                // than receivers, so being disconnected is impossible. And the channel's
+                // of the code guarantees that receivers will always be alive longer
+                // than senders, so being disconnected is impossible. And the channel's
                 // are both unbounded, so they can never be full.
                 unsafe {
                     $err_chan_desu.try_send(e.into()).unwrap_unchecked();
@@ -52,15 +58,11 @@ impl<'a> FileFinder<'a> {
             self_ref.im_the_carrot_king(dir_path, scope, ignore_list_ref, error_s, path_s)
         });
 
-        // No need to use blocking operations because both senders will
-        // have been dropped by this point.
+        // No need to use blocking operations because both senders will have been dropped by this point.
         match error_r.try_recv() {
-            // An error is returned if the error channel is empty,
-            // which is our success case.
+            // If the channel is empty then we have no errors, which is our success case.
             Err(_) => Ok(path_r.try_iter().collect()),
-
-            // If the channel isn't empty than we have an error that
-            // needs to be propagated.
+            // If the channel isn't empty then we have an error that needs to be propagated.
             Ok(e) => Err(e),
         }
     }
@@ -93,7 +95,7 @@ impl<'a> FileFinder<'a> {
                 continue;
             }
             let metadata = unwrap_or_push_error_and_return!(entry.metadata(), error_s);
-            // We prefer `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
+            // We prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
             // any use for, and it is absolutely massive on windows platforms.
             let path = entry.into_path();
             if metadata.is_file() {
