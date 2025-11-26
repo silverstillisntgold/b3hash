@@ -124,7 +124,7 @@ impl<'a> FileFinder<'a> {
 
     /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.
     fn build_ignore_list(&self) -> Result<GlobSet, Error> {
-        let mut builder = GlobSet::builder();
+        let mut gs_builder = GlobSet::builder();
         if self.respect_ignore {
             let ignore_file = self.custom_ignore_source.unwrap_or(IGNOREFILE.into());
             let ignore_path = self.directory_path.join(ignore_file);
@@ -134,12 +134,12 @@ impl<'a> FileFinder<'a> {
                 .map(str::trim)
                 .filter(|s| s.chars().next().is_some_and(|s| s != IGNOREFILE_COMMENT))
                 .try_for_each(|glob| {
-                    let pat = Glob::new(glob)?;
-                    builder.add(pat);
+                    let pattern = Glob::new(glob)?;
+                    gs_builder.add(pattern);
                     Ok::<_, globset::Error>(())
                 })?;
         }
-        let gs = builder.build()?;
+        let gs = gs_builder.build()?;
         Ok(gs)
     }
 }

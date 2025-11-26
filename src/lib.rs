@@ -6,6 +6,7 @@ A crate for creating and validating directory hashfiles.
 
 #![allow(unused)]
 
+mod arcvec;
 mod file;
 
 use blake3::Hash;
