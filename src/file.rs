@@ -1,9 +1,11 @@
+use crate::arcvec::ArcVec;
 use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
-use crossbeam_channel::Sender;
 use globset::{Glob, GlobSet};
 use std::fs;
 
+const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
+const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 const IGNOREFILE_COMMENT: char = '#';
 
@@ -26,18 +28,11 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 }
 
 macro_rules! unwrap_or_push_error_and_return {
-    ($expr: expr, $err_chan_desu: ident) => {
+    ($expr: expr, $errors: ident) => {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                // SAFETY: Calls to `Sender::try_send` will only return an error if
-                // the channel being sent into is full or disconnected. The structure
-                // of the code guarantees that receivers will always be alive longer
-                // than senders, so being disconnected is impossible. And the channel's
-                // are both unbounded, so they can never be full.
-                unsafe {
-                    $err_chan_desu.try_send(e.into()).unwrap_unchecked();
-                }
+                $errors.inner().push(e.into());
                 return;
             }
         }
@@ -48,22 +43,23 @@ impl<'a> FileFinder<'a> {
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
         let ignore_list = self.build_ignore_list()?;
-        let (error_s, error_r) = crossbeam_channel::unbounded::<Error>();
-        let (path_s, path_r) = crossbeam_channel::unbounded::<Utf8PathBuf>();
+        let errors = ArcVec::new();
+        let paths = ArcVec::with_capacity(FILE_CAP_DEFAULT_GLOBAL);
 
         let dir_path = self.directory_path.to_owned();
         let ignore_list_ref = &ignore_list;
         let self_ref = &self;
+        let errors_clone = errors.clone();
+        let paths_clone = paths.clone();
         rayon::in_place_scope(move |scope| {
-            self_ref.im_the_carrot_king(dir_path, scope, ignore_list_ref, error_s, path_s)
+            self_ref.im_the_carrot_king(scope, dir_path, ignore_list_ref, errors_clone, paths_clone)
         });
 
-        // No need to use blocking operations because both senders will have been dropped by this point.
-        match error_r.try_recv() {
-            // If the channel is empty then we have no errors, which is our success case.
-            Err(_) => Ok(path_r.try_iter().collect()),
-            // If the channel isn't empty then we have an error that needs to be propagated.
-            Ok(e) => Err(e),
+        let errors = unsafe { errors.into_inner() };
+        let paths = unsafe { paths.into_inner() };
+        match errors.into_iter().next() {
+            None => Ok(paths),
+            Some(e) => Err(e),
         }
     }
 
@@ -75,19 +71,23 @@ impl<'a> FileFinder<'a> {
     /// directory if an error is pushed in some other worker during their execution.
     fn im_the_carrot_king(
         &'a self,
-        dir_path: Utf8PathBuf,
         scope: &rayon::Scope<'a>,
+        dir_path: Utf8PathBuf,
         ignore_list: &'a GlobSet,
-        error_s: Sender<Error>,
-        path_s: Sender<Utf8PathBuf>,
+        errors: ArcVec<Error>,
+        paths: ArcVec<Utf8PathBuf>,
     ) {
         // Kill procedure early if an error has already been encountered.
-        if !error_s.is_empty() {
+        if !errors.inner().is_empty() {
             return;
         }
-        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), error_s);
+        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), errors);
+        // Every time we need to operate on `paths` we have to lock it's mutex,
+        // so it's best to keep all our paths in a local vec and just append
+        // all of them in bulk after all paths have been scanned.
+        let mut local_paths = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
-            let entry = unwrap_or_push_error_and_return!(entry, error_s);
+            let entry = unwrap_or_push_error_and_return!(entry, errors);
             // Skip operating on an entry as soon as we have enough information to do so.
             if (self.respect_hidden && entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX))
                 || (self.respect_ignore && ignore_list.is_match(entry.path().as_std_path()))
@@ -95,31 +95,23 @@ impl<'a> FileFinder<'a> {
             {
                 continue;
             }
-            let metadata = unwrap_or_push_error_and_return!(entry.metadata(), error_s);
+            let metadata = unwrap_or_push_error_and_return!(entry.metadata(), errors);
             // We prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
             // any use for, and it is absolutely massive on windows platforms.
             let path = entry.into_path();
             if metadata.is_file() {
                 if metadata.len() > 0 {
-                    // SAFETY: Safe for the same reason the error macro is safe.
-                    unsafe {
-                        path_s.try_send(path).unwrap_unchecked();
-                    }
+                    local_paths.push(path);
                 }
             } else if metadata.is_dir() {
-                let error_s_clone = error_s.clone();
-                let path_s_clone = path_s.clone();
+                let errors_clone = errors.clone();
+                let paths_clone = paths.clone();
                 scope.spawn(move |new_scope| {
-                    self.im_the_carrot_king(
-                        path,
-                        new_scope,
-                        ignore_list,
-                        error_s_clone,
-                        path_s_clone,
-                    )
+                    self.im_the_carrot_king(new_scope, path, ignore_list, errors_clone, paths_clone)
                 });
             }
         }
+        paths.inner().extend(local_paths);
     }
 
     /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.

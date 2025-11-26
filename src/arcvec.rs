@@ -1,8 +1,9 @@
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use std::sync::Arc;
 
-/// Thin wrapper around a [`Vec`], forwarding just a small subset
-/// of it's operations in a thread-safe way.
+const DEFAULT_CAPACITY: usize = 4;
+
+/// Thin, thread-safe wrapper around a [`Vec`].
 pub struct ArcVec<T> {
     inner: Arc<Mutex<Vec<T>>>,
 }
@@ -20,7 +21,7 @@ impl<T> ArcVec<T> {
     /// Creates a new `ArcVec` with a small default allocation.
     #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(4)
+        Self::with_capacity(DEFAULT_CAPACITY)
     }
 
     /// Calls [`Vec::with_capacity`] with `capacity`.
@@ -30,22 +31,10 @@ impl<T> ArcVec<T> {
         Self { inner }
     }
 
-    /// Calls [`Vec::is_empty`] after locking `self`.
+    /// Provides access to the inner `Vec` via a [`MutexGuard`].
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.inner.lock().is_empty()
-    }
-
-    /// Calls [`Vec::push`] with `value` after locking `self`.
-    #[inline]
-    pub fn push(&self, value: T) {
-        self.inner.lock().push(value);
-    }
-
-    /// Calls [`Vec::extend`] with `iter` after locking `self`.
-    #[inline]
-    pub fn extend(&self, iter: impl IntoIterator<Item = T>) {
-        self.inner.lock().extend(iter);
+    pub fn inner<'a>(&'a self) -> MutexGuard<'a, Vec<T>> {
+        self.inner.lock()
     }
 
     /// Extracts the internal `Vec` of this `ArcVec`.
