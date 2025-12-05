@@ -9,6 +9,7 @@ const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 const IGNOREFILE_COMMENT: char = '#';
 
+/// Utility struct for recursively finding all files within a given directory.
 pub struct FileFinder<'a> {
     directory_path: &'a Utf8Path,
     custom_ignore_source: Option<&'a Utf8Path>,
@@ -27,12 +28,13 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
     }
 }
 
+/// Utility macro so I don't have to retype this shit.
 macro_rules! unwrap_or_push_error_and_return {
     ($expr: expr, $errors: ident) => {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                $errors.inner().push(e.into());
+                $errors.lock().push(e.into());
                 return;
             }
         }
@@ -40,23 +42,28 @@ macro_rules! unwrap_or_push_error_and_return {
 }
 
 impl<'a> FileFinder<'a> {
+    /// Returns a list of all visible files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
         let ignore_list = self.build_ignore_list()?;
         let errors = ArcVec::new();
         let paths = ArcVec::with_capacity(FILE_CAP_DEFAULT_GLOBAL);
 
+        let self_ref = &self;
         let dir_path = self.directory_path.to_owned();
         let ignore_list_ref = &ignore_list;
-        let self_ref = &self;
         let errors_clone = errors.clone();
         let paths_clone = paths.clone();
         rayon::in_place_scope(move |scope| {
             self_ref.im_the_carrot_king(scope, dir_path, ignore_list_ref, errors_clone, paths_clone)
         });
 
+        // SAFETY: rayon::in_place_scope is a blocking operation, so by this
+        // point all clones of `errors` and `paths` will have been dropped and
+        // the strong reference count will be 1 for both variables.
         let errors = unsafe { errors.into_inner() };
         let paths = unsafe { paths.into_inner() };
+        // If any errors were found, we only worry about propagating the first.
         match errors.into_iter().next() {
             None => Ok(paths),
             Some(e) => Err(e),
@@ -65,9 +72,9 @@ impl<'a> FileFinder<'a> {
 
     /// Sometimes you just need to eat a carrot. Fuck I forgot to get carrots when I went to Aldi's.
     ///
-    /// For directory `dir_path`, sends all file paths into `path_s`, spawns a new parallel instance for
-    /// all directories, and sends any errors encountered into `error_s`. Newly spawned instances will
-    /// terminate immediately if `error_s` contains any errors, but will finish working within their current
+    /// For directory `dir_path`, sends all file paths into `paths`, spawns a new parallel instance for
+    /// all directories, and sends any errors encountered into `errors`. Newly spawned instances will
+    /// terminate immediately if `errors` contains any errors, but will finish working within their current
     /// directory if an error is pushed in some other worker during their execution.
     fn im_the_carrot_king(
         &'a self,
@@ -78,14 +85,15 @@ impl<'a> FileFinder<'a> {
         paths: ArcVec<Utf8PathBuf>,
     ) {
         // Kill procedure early if an error has already been encountered.
-        if !errors.inner().is_empty() {
+        // Only check once to avoid excessive lock contention.
+        if !errors.lock().is_empty() {
             return;
         }
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), errors);
         // Every time we need to operate on `paths` we have to lock it's mutex,
         // so it's best to keep all our paths in a local vec and just append
-        // all of them in bulk after all paths have been scanned.
-        let mut local_paths = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
+        // all of them in bulk after all entries have been scanned.
+        let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, errors);
             // Skip operating on an entry as soon as we have enough information to do so.
@@ -101,7 +109,7 @@ impl<'a> FileFinder<'a> {
             let path = entry.into_path();
             if metadata.is_file() {
                 if metadata.len() > 0 {
-                    local_paths.push(path);
+                    paths_local.push(path);
                 }
             } else if metadata.is_dir() {
                 let errors_clone = errors.clone();
@@ -111,7 +119,7 @@ impl<'a> FileFinder<'a> {
                 });
             }
         }
-        paths.inner().extend(local_paths);
+        paths.lock().extend(paths_local);
     }
 
     /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.
@@ -128,7 +136,7 @@ impl<'a> FileFinder<'a> {
                 .try_for_each(|glob| {
                     let pattern = Glob::new(glob)?;
                     gs_builder.add(pattern);
-                    Ok::<_, globset::Error>(())
+                    Ok::<(), globset::Error>(())
                 })?;
         }
         let gs = gs_builder.build()?;
