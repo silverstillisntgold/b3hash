@@ -2,7 +2,7 @@ use crate::arcvec::ArcVec;
 use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
 use globset::{Glob, GlobSet};
-use std::fs;
+use std::{fs, io};
 
 const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
 const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
@@ -15,6 +15,7 @@ pub struct FileFinder<'a> {
     custom_ignore_source: Option<&'a Utf8Path>,
     respect_hidden: bool,
     respect_ignore: bool,
+    allow_missing_ignore: bool,
 }
 
 impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
@@ -24,6 +25,7 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
             custom_ignore_source: value.custom_ignore_source.as_deref(),
             respect_hidden: value.respect_hidden,
             respect_ignore: value.respect_ignore,
+            allow_missing_ignore: value.allow_missing_ignore,
         }
     }
 }
@@ -126,18 +128,33 @@ impl<'a> FileFinder<'a> {
     fn build_ignore_list(&self) -> Result<GlobSet, Error> {
         let mut gs_builder = GlobSet::builder();
         if self.respect_ignore {
-            let ignore_file = self.custom_ignore_source.unwrap_or(IGNOREFILE.into());
+            let ignore_file = match self.custom_ignore_source {
+                None => IGNOREFILE.into(),
+                Some(file_name) => file_name,
+            };
             let ignore_path = self.directory_path.join(ignore_file);
-            fs::read_to_string(ignore_path)?
-                .trim()
-                .lines()
-                .map(str::trim)
-                .filter(|s| s.chars().next().is_some_and(|s| s != IGNOREFILE_COMMENT))
-                .try_for_each(|glob| {
-                    let pattern = Glob::new(glob)?;
-                    gs_builder.add(pattern);
-                    Ok::<(), globset::Error>(())
-                })?;
+            match fs::read_to_string(ignore_path) {
+                Ok(s) => s
+                    .trim()
+                    .lines()
+                    .map(str::trim)
+                    .filter(|s| s.chars().next().is_some_and(|s| s != IGNOREFILE_COMMENT))
+                    .try_for_each(|glob| {
+                        let pattern = Glob::new(glob)?;
+                        gs_builder.add(pattern);
+                        Ok::<(), globset::Error>(())
+                    })?,
+                Err(e) => match e.kind() {
+                    io::ErrorKind::NotFound => {
+                        if self.allow_missing_ignore {
+                            // Do nothing.
+                        } else {
+                            return Err(e.into());
+                        }
+                    }
+                    _ => return Err(e.into()),
+                },
+            }
         }
         let gs = gs_builder.build()?;
         Ok(gs)

@@ -4,7 +4,6 @@
 A crate for creating and validating directory hashfiles.
 */
 
-#![allow(unused)]
 //#![deny(missing_docs)]
 
 mod arcvec;
@@ -13,17 +12,13 @@ mod file;
 use blake3::{Hash, Hasher};
 use bon::Builder;
 use camino::Utf8PathBuf;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{SendError, Sender};
 use file::FileFinder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io;
-use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-const CURRENT_VERSION: u64 = 1;
+use std::{fs, io};
 
 /// The name of file where [`Manifest`] will be serialized to.
 pub const HASHFILE: &str = ".b3hash";
@@ -33,11 +28,16 @@ pub const HASHFILE: &str = ".b3hash";
 /// If the ignorefile you wish to use doesn't have this name, you'll need to specify it.
 pub const IGNOREFILE: &str = ".gitignore";
 
+pub const MANIFEST_VERSION: u64 = 1;
+
 /// Error type for the crate.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("file hashing cancelled early")]
+    Cancelled,
+
     #[error(transparent)]
-    Io(#[from] io::Error),
+    Channel(#[from] SendError<Event>),
 
     #[error(transparent)]
     Glob(#[from] globset::Error),
@@ -46,10 +46,10 @@ pub enum Error {
     Hex(#[from] blake3::HexError),
 
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Io(#[from] io::Error),
 
-    #[error("file hashing cancelled early")]
-    Cancelled,
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -61,7 +61,7 @@ pub struct Manifest {
     entries: Vec<Entry>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Entry {
     path: Utf8PathBuf,
     hash: Hash,
@@ -88,17 +88,14 @@ pub struct DirectoryHasher {
     /// Provides a specific file or file path of an ignorefile.
     custom_ignore_source: Option<Utf8PathBuf>,
 
-    /// Specifies the amount of threads the underlaying rayon threadpool should use.
-    ///
-    /// Useful if you'll be running [`DirectoryHasher`] in a background thread
-    /// and don't want it consuming all CPU resources, as is the default.
-    num_threads: Option<NonZeroUsize>,
-
     #[builder(default = true)]
     respect_hidden: bool,
 
     #[builder(default = true)]
     respect_ignore: bool,
+
+    #[builder(default = true)]
+    allow_missing_ignore: bool,
 
     /// Provides a channel which will be used to send internal information to the
     /// receiving end as operation proceeds.
@@ -109,7 +106,21 @@ pub struct DirectoryHasher {
 }
 
 impl DirectoryHasher {
+    #[inline(never)]
     pub fn hash(self) -> Result<Manifest, Error> {
+        let entries = self.hash_internal()?;
+        let manifest = if let Some(sender) = &self.progress_channel {
+            sender.send(Event::DirectoryHashingStarted)?;
+            let manifest = self.hash_directory(entries);
+            sender.send(Event::DirectoryHashingCompleted)?;
+            manifest
+        } else {
+            self.hash_directory(entries)
+        };
+        Ok(manifest)
+    }
+
+    fn hash_internal<C: FromParallelIterator<Entry>>(&self) -> Result<C, Error> {
         // Ensure that we never include a leading `/` or `\` when stripping paths.
         let prefix_len = if self.directory_path.as_str().ends_with('/')
             || self.directory_path.as_str().ends_with('\\')
@@ -118,34 +129,22 @@ impl DirectoryHasher {
         } else {
             self.directory_path.as_str().len() + 1
         };
-
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileDiscoveryStarted);
-        }
-        let file_list = self.get_file_list(prefix_len)?;
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileDiscoveryCompleted(file_list.len()));
-        }
-
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileHashingStarted);
-        }
-        let entries = self.hash_files(file_list, prefix_len)?;
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileHashingCompleted);
-        }
-
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::DirectoryHashingStarted);
-        }
-        let manifest = self.hash_directory(entries);
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::DirectoryHashingCompleted);
-        }
-        Ok(manifest)
+        let entries = if let Some(sender) = &self.progress_channel {
+            sender.send(Event::FileDiscoveryStarted)?;
+            let file_list = self.find_files(prefix_len)?;
+            sender.send(Event::FileDiscoveryCompleted(file_list.len()))?;
+            sender.send(Event::FileHashingStarted)?;
+            let entries = self.hash_files(file_list, prefix_len)?;
+            sender.send(Event::FileHashingCompleted)?;
+            entries
+        } else {
+            let file_list = self.find_files(prefix_len)?;
+            self.hash_files(file_list, prefix_len)?
+        };
+        Ok(entries)
     }
 
-    fn get_file_list(&self, prefix_len: usize) -> Result<Vec<Utf8PathBuf>, Error> {
+    fn find_files(&self, prefix_len: usize) -> Result<Vec<Utf8PathBuf>, Error> {
         let mut file_list = FileFinder::from(self).find()?;
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the given prefix will be, so it's best
@@ -160,11 +159,11 @@ impl DirectoryHasher {
         Ok(file_list)
     }
 
-    fn hash_files(
+    fn hash_files<C: FromParallelIterator<Entry>>(
         &self,
         file_list: Vec<Utf8PathBuf>,
         prefix_len: usize,
-    ) -> Result<Vec<Entry>, Error> {
+    ) -> Result<C, Error> {
         file_list
             .into_par_iter()
             .map_with(self, |s, file| {
@@ -174,7 +173,7 @@ impl DirectoryHasher {
                     return Err(Error::Cancelled);
                 }
                 let mut hasher = Hasher::new();
-                let reader = File::open(file.as_std_path())?;
+                let reader = fs::File::open(file.as_std_path())?;
                 // Calls to `Hasher::update_reader` internally buffer 64KiB of
                 // data, so we don't need to worry about doing that manually.
                 hasher.update_reader(reader)?;
@@ -186,7 +185,7 @@ impl DirectoryHasher {
                 let size = hasher.count();
                 debug_assert!(size > 0);
                 if let Some(sender) = &s.progress_channel {
-                    sender.send(Event::FileHashed(file));
+                    sender.send(Event::FileHashed(file))?;
                 }
                 Ok(Entry { path, hash, size })
             })
@@ -207,7 +206,7 @@ impl DirectoryHasher {
         }
         let directory_hash = hasher.finalize();
         Manifest {
-            version: CURRENT_VERSION,
+            version: MANIFEST_VERSION,
             directory_name,
             directory_hash,
             directory_size,
@@ -215,8 +214,23 @@ impl DirectoryHasher {
         }
     }
 
-    pub fn verify(self) {
-        todo!();
+    pub fn verify(self) -> Result<Result<(), Vec<Entry>>, Error> {
+        let old_data = fs::read(HASHFILE)?;
+        let (new_entries, old_manifest) = rayon::join(
+            || self.hash_internal::<HashSet<Entry>>(),
+            || serde_json::from_slice::<Manifest>(&old_data),
+        );
+        let old_entries = old_manifest?.entries;
+        let new_entries = new_entries?;
+        let missing_entries = old_entries
+            .into_iter()
+            .filter(|entry| !new_entries.contains(entry))
+            .collect::<Vec<Entry>>();
+        match missing_entries.len() {
+            // OK OK, I'M NOT OK
+            0 => Ok(Ok(())),
+            _ => Ok(Err(missing_entries)),
+        }
     }
 }
 
