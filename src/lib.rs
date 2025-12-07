@@ -94,11 +94,9 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     respect_ignore: bool,
 
-    #[builder(default = true)]
+    #[builder(default = false)]
     allow_missing_ignore: bool,
 
-    /// Provides a channel which will be used to send internal information to the
-    /// receiving end as operation proceeds.
     progress_channel: Option<Sender<Event>>,
 
     /// A flag for signaling early cancellation from outside.
@@ -214,7 +212,7 @@ impl DirectoryHasher {
         }
     }
 
-    pub fn verify(self) -> Result<Result<(), Vec<Entry>>, Error> {
+    pub fn verify(&self) -> Result<Result<(), Vec<Entry>>, Error> {
         let old_data = fs::read(HASHFILE)?;
         let (new_entries, old_manifest) = rayon::join(
             || self.hash_internal::<HashSet<Entry>>(),
@@ -231,6 +229,10 @@ impl DirectoryHasher {
             0 => Ok(Ok(())),
             _ => Ok(Err(missing_entries)),
         }
+    }
+
+    pub fn verify_specific(&self, _entries: Vec<Entry>) -> Result<Result<(), Vec<Entry>>, Error> {
+        todo!()
     }
 }
 

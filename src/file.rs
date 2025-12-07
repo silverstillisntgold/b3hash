@@ -9,7 +9,7 @@ const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 const IGNOREFILE_COMMENT: char = '#';
 
-/// Utility struct for recursively finding all files within a given directory.
+/// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
     directory_path: &'a Utf8Path,
     custom_ignore_source: Option<&'a Utf8Path>,
@@ -57,28 +57,26 @@ impl<'a> FileFinder<'a> {
         let errors_clone = errors.clone();
         let paths_clone = paths.clone();
         rayon::in_place_scope(move |scope| {
-            self_ref.im_the_carrot_king(scope, dir_path, ignore_list_ref, errors_clone, paths_clone)
+            self_ref.recurse_directory(scope, dir_path, ignore_list_ref, errors_clone, paths_clone)
         });
 
-        // SAFETY: rayon::in_place_scope is a blocking operation, so by this
+        // SAFETY: `rayon::in_place_scope` is a blocking operation; by this
         // point all clones of `errors` and `paths` will have been dropped and
         // the strong reference count will be 1 for both variables.
         let errors = unsafe { errors.into_inner() };
         let paths = unsafe { paths.into_inner() };
-        // If any errors were found, we only worry about propagating the first.
+        // If any errors were found, we only propagate the first.
         match errors.into_iter().next() {
             None => Ok(paths),
             Some(e) => Err(e),
         }
     }
 
-    /// Sometimes you just need to eat a carrot. Fuck I forgot to get carrots when I went to Aldi's.
-    ///
     /// For directory `dir_path`, sends all file paths into `paths`, spawns a new parallel instance for
     /// all directories, and sends any errors encountered into `errors`. Newly spawned instances will
     /// terminate immediately if `errors` contains any errors, but will finish working within their current
     /// directory if an error is pushed in some other worker during their execution.
-    fn im_the_carrot_king(
+    fn recurse_directory(
         &'a self,
         scope: &rayon::Scope<'a>,
         dir_path: Utf8PathBuf,
@@ -94,7 +92,7 @@ impl<'a> FileFinder<'a> {
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), errors);
         // Every time we need to operate on `paths` we have to lock it's mutex,
         // so it's best to keep all our paths in a local vec and just append
-        // all of them in bulk after all entries have been scanned.
+        // them in bulk after all entries have been scanned.
         let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, errors);
@@ -107,9 +105,10 @@ impl<'a> FileFinder<'a> {
             }
             let metadata = unwrap_or_push_error_and_return!(entry.metadata(), errors);
             // We prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
-            // any use for, and it is absolutely massive on windows platforms.
+            // any use for, and it's absolutely massive on windows platforms.
             let path = entry.into_path();
             if metadata.is_file() {
+                // Nested to prevent files with a length of 0 from hitting the else branch.
                 if metadata.len() > 0 {
                     paths_local.push(path);
                 }
@@ -117,7 +116,7 @@ impl<'a> FileFinder<'a> {
                 let errors_clone = errors.clone();
                 let paths_clone = paths.clone();
                 scope.spawn(move |new_scope| {
-                    self.im_the_carrot_king(new_scope, path, ignore_list, errors_clone, paths_clone)
+                    self.recurse_directory(new_scope, path, ignore_list, errors_clone, paths_clone)
                 });
             }
         }
