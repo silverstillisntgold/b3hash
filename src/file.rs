@@ -104,11 +104,11 @@ impl<'a> FileFinder<'a> {
                 continue;
             }
             let metadata = unwrap_or_push_error_and_return!(entry.metadata(), errors);
-            // We prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
+            // Prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
             // any use for, and it's absolutely massive on windows platforms.
             let path = entry.into_path();
             if metadata.is_file() {
-                // Nested to prevent files with a length of 0 from hitting the else branch.
+                // Nested to prevent files with a size of 0 from hitting the else branch.
                 if metadata.len() > 0 {
                     paths_local.push(path);
                 }
