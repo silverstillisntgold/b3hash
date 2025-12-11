@@ -2,6 +2,7 @@ use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
 use globset::{Glob, GlobSet};
 use parking_lot::Mutex;
+use rayon::Scope;
 use std::{fs, io};
 
 const ERROR_CAP_DEFAULT: usize = 1 << 2;
@@ -48,7 +49,7 @@ impl<'a> FileFinder<'a> {
     /// Returns a list of all visible files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
-        let dir_path = self.directory_path.to_owned();
+        let dir_path = self.directory_path.to_path_buf();
         let ignore_list = self.build_ignore_list()?;
         let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
         let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
@@ -68,7 +69,7 @@ impl<'a> FileFinder<'a> {
     /// directory if an error is pushed in some other worker during their execution.
     fn recurse_directory(
         &'a self,
-        scope: &rayon::Scope<'a>,
+        scope: &Scope<'a>,
         dir_path: Utf8PathBuf,
         ignore_list: &'a Option<GlobSet>,
         errors: &'a Mutex<Vec<Error>>,
