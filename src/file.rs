@@ -1,9 +1,10 @@
-use crate::arcvec::ArcVec;
 use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
 use globset::{Glob, GlobSet};
+use parking_lot::Mutex;
 use std::{fs, io};
 
+const ERROR_CAP_DEFAULT: usize = 1 << 2;
 const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
 const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
@@ -48,23 +49,16 @@ impl<'a> FileFinder<'a> {
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
         let ignore_list = self.build_ignore_list()?;
-        let errors = ArcVec::new();
-        let paths = ArcVec::with_capacity(FILE_CAP_DEFAULT_GLOBAL);
+        let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
+        let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
 
-        let self_ref = &self;
         let dir_path = self.directory_path.to_owned();
-        let ignore_list_ref = &ignore_list;
-        let errors_clone = errors.clone();
-        let paths_clone = paths.clone();
-        rayon::in_place_scope(move |scope| {
-            self_ref.recurse_directory(scope, dir_path, ignore_list_ref, errors_clone, paths_clone)
+        rayon::in_place_scope(|scope| {
+            self.recurse_directory(scope, dir_path, &ignore_list, &errors, &paths)
         });
 
-        // SAFETY: `rayon::in_place_scope` is a blocking operation; by this
-        // point all clones of `errors` and `paths` will have been dropped and
-        // the strong reference count will be 1 for both variables.
-        let errors = unsafe { errors.into_inner() };
-        let paths = unsafe { paths.into_inner() };
+        let errors = errors.into_inner();
+        let paths = paths.into_inner();
         // If any errors were found, we only propagate the first.
         match errors.into_iter().next() {
             None => Ok(paths),
@@ -80,9 +74,9 @@ impl<'a> FileFinder<'a> {
         &'a self,
         scope: &rayon::Scope<'a>,
         dir_path: Utf8PathBuf,
-        ignore_list: &'a GlobSet,
-        errors: ArcVec<Error>,
-        paths: ArcVec<Utf8PathBuf>,
+        ignore_list: &'a Option<GlobSet>,
+        errors: &'a Mutex<Vec<Error>>,
+        paths: &'a Mutex<Vec<Utf8PathBuf>>,
     ) {
         // Kill procedure early if an error has already been encountered.
         // Only check once to avoid excessive lock contention.
@@ -98,7 +92,9 @@ impl<'a> FileFinder<'a> {
             let entry = unwrap_or_push_error_and_return!(entry, errors);
             // Skip operating on an entry as soon as we have enough information to do so.
             if (self.respect_hidden && entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX))
-                || (self.respect_ignore && ignore_list.is_match(entry.path().as_std_path()))
+                || ignore_list
+                    .as_ref()
+                    .is_some_and(|gs| gs.is_match(entry.path().as_std_path()))
                 || entry.file_name() == HASHFILE
             {
                 continue;
@@ -113,10 +109,8 @@ impl<'a> FileFinder<'a> {
                     paths_local.push(path);
                 }
             } else if metadata.is_dir() {
-                let errors_clone = errors.clone();
-                let paths_clone = paths.clone();
-                scope.spawn(move |new_scope| {
-                    self.recurse_directory(new_scope, path, ignore_list, errors_clone, paths_clone)
+                scope.spawn(|new_scope| {
+                    self.recurse_directory(new_scope, path, ignore_list, errors, paths)
                 });
             }
         }
@@ -124,20 +118,20 @@ impl<'a> FileFinder<'a> {
     }
 
     /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.
-    fn build_ignore_list(&self) -> Result<GlobSet, Error> {
-        let mut gs_builder = GlobSet::builder();
+    fn build_ignore_list(&self) -> Result<Option<GlobSet>, Error> {
         if self.respect_ignore {
+            let mut gs_builder = GlobSet::builder();
             let ignore_file = match self.custom_ignore_source {
                 None => IGNOREFILE.into(),
                 Some(file_name) => file_name,
             };
-            let ignore_path = self.directory_path.join(ignore_file);
-            match fs::read_to_string(ignore_path) {
+            let ignore_file_path = self.directory_path.join(ignore_file);
+            match fs::read_to_string(ignore_file_path) {
                 Ok(s) => s
                     .trim()
                     .lines()
                     .map(str::trim)
-                    .filter(|s| s.chars().next().is_some_and(|s| s != IGNOREFILE_COMMENT))
+                    .filter(|s| s.chars().next().is_some_and(|c| c != IGNOREFILE_COMMENT))
                     .try_for_each(|glob| {
                         let pattern = Glob::new(glob)?;
                         gs_builder.add(pattern);
@@ -146,7 +140,7 @@ impl<'a> FileFinder<'a> {
                 Err(e) => match e.kind() {
                     io::ErrorKind::NotFound => {
                         if self.allow_missing_ignore {
-                            // Do nothing.
+                            return Ok(None);
                         } else {
                             return Err(e.into());
                         }
@@ -154,8 +148,14 @@ impl<'a> FileFinder<'a> {
                     _ => return Err(e.into()),
                 },
             }
+            let gs = gs_builder.build()?;
+            if !gs.is_empty() {
+                Ok(Some(gs))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
         }
-        let gs = gs_builder.build()?;
-        Ok(gs)
     }
 }
