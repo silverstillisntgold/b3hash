@@ -72,6 +72,9 @@ pub enum Event {
     FileDiscoveryStarted,
     FileDiscoveryCompleted(usize),
 
+    FileSortingStarted,
+    FileSortingCompleted,
+
     FileHashingStarted,
     FileHashed(Utf8PathBuf),
     FileHashingCompleted,
@@ -132,7 +135,9 @@ impl DirectoryHasher {
         let mut file_list = FileFinder::from(self).find()?;
         if let Some(sender) = &self.progress_channel {
             sender.send(Event::FileDiscoveryCompleted(file_list.len()))?;
+            sender.send(Event::FileSortingStarted)?;
         }
+        // Stable sorting has no use here since all paths will be unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the given prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
@@ -143,6 +148,9 @@ impl DirectoryHasher {
             let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
             a_stripped.cmp(b_stripped)
         });
+        if let Some(sender) = &self.progress_channel {
+            sender.send(Event::FileSortingCompleted)?;
+        }
         Ok(file_list)
     }
 
