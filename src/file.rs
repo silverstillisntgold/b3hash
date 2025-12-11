@@ -48,20 +48,16 @@ impl<'a> FileFinder<'a> {
     /// Returns a list of all visible files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
+        let dir_path = self.directory_path.to_owned();
         let ignore_list = self.build_ignore_list()?;
         let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
         let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
-
-        let dir_path = self.directory_path.to_owned();
         rayon::in_place_scope(|scope| {
             self.recurse_directory(scope, dir_path, &ignore_list, &errors, &paths)
         });
-
-        let errors = errors.into_inner();
-        let paths = paths.into_inner();
         // If any errors were found, we only propagate the first.
-        match errors.into_iter().next() {
-            None => Ok(paths),
+        match errors.into_inner().into_iter().next() {
+            None => Ok(paths.into_inner()),
             Some(e) => Err(e),
         }
     }
