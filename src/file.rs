@@ -1,4 +1,6 @@
-use crate::{DirectoryHasher, Error, HASHFILE, IGNOREFILE};
+use crate::hasher::DirectoryHasher;
+use crate::util::Error;
+use crate::{HASHFILE, IGNOREFILE};
 use camino::{Utf8Path, Utf8PathBuf};
 use globset::{Glob, GlobSet};
 use parking_lot::Mutex;
@@ -87,12 +89,12 @@ impl<'a> FileFinder<'a> {
         let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, errors);
-            // Skip operating on an entry as soon as we have enough information to do so.
-            if (self.respect_hidden && entry.file_name().starts_with(HIDDEN_ENTRY_PREFIX))
+            let entry_name = entry.file_name();
+            if (self.respect_hidden && entry_name.starts_with(HIDDEN_ENTRY_PREFIX))
                 || ignore_list
                     .as_ref()
                     .is_some_and(|gs| gs.is_match(entry.path().as_std_path()))
-                || entry.file_name() == HASHFILE
+                || entry_name == HASHFILE
             {
                 continue;
             }
@@ -134,25 +136,16 @@ impl<'a> FileFinder<'a> {
                         gs_builder.add(pattern);
                         Ok::<(), globset::Error>(())
                     })?,
-                Err(e) => match e.kind() {
-                    io::ErrorKind::NotFound => {
-                        if self.allow_missing_ignore {
-                            return Ok(None);
-                        } else {
-                            return Err(e.into());
-                        }
-                    }
-                    _ => return Err(e.into()),
+                Err(e) => match e.kind() == io::ErrorKind::NotFound && self.allow_missing_ignore {
+                    true => return Ok(None),
+                    false => return Err(e.into()),
                 },
             }
             let gs = gs_builder.build()?;
             if !gs.is_empty() {
-                Ok(Some(gs))
-            } else {
-                Ok(None)
+                return Ok(Some(gs));
             }
-        } else {
-            Ok(None)
         }
+        Ok(None)
     }
 }
