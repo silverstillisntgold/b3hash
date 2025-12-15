@@ -51,7 +51,7 @@ impl DirectoryHasher {
         Ok(manifest)
     }
 
-    fn hash_internal<C: FromParallelIterator<Entry>>(&self) -> Result<C, Error> {
+    pub(crate) fn hash_internal<C: FromParallelIterator<Entry>>(&self) -> Result<C, Error> {
         // Ensure that we never include a leading `/` or `\` when stripping paths.
         let prefix_len = if self.directory_path.as_str().ends_with('/')
             || self.directory_path.as_str().ends_with('\\')
@@ -60,8 +60,6 @@ impl DirectoryHasher {
         } else {
             self.directory_path.as_str().len() + 1
         };
-        println!("prefix: {}", self.directory_path.as_str());
-        println!("prefix len: {}", prefix_len);
         let file_list = self.find_files(prefix_len)?;
         let entries = self.hash_files(file_list, prefix_len)?;
         Ok(entries)

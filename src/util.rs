@@ -45,6 +45,8 @@ pub enum Event {
     DirectoryHashingCompleted,
 }
 
+/// Pointer into an [`AtomicBool`] used to signal that an operation
+/// should be canceled early.
 #[derive(Clone, Debug, Default)]
 pub struct CancelHandle(Arc<AtomicBool>);
 
