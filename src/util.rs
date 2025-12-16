@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 
 /// Error type for the crate.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("file hashing cancelled early")]
@@ -27,6 +28,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
+/// Events which can be emitted during hashing.
+#[allow(missing_docs)]
 #[derive(Debug)]
 pub enum Event {
     FileDiscoveryStarted,

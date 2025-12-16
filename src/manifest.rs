@@ -1,7 +1,8 @@
 use crate::hasher::DirectoryHasher;
-use crate::util::Error;
+use crate::util::{CancelHandle, Error, Event};
 use blake3::Hash;
 use camino::Utf8PathBuf;
+use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -25,6 +26,14 @@ pub struct Entry {
 }
 
 impl Manifest {
+    pub fn cancel_handle(&mut self) -> CancelHandle {
+        self.directory_hasher.cancel_handle()
+    }
+
+    pub fn progress_channel(&mut self, sender: Sender<Event>) {
+        self.directory_hasher.progress_channel = Some(sender);
+    }
+
     #[inline(never)]
     pub fn verify(&self) -> Result<Option<Vec<Entry>>, Error> {
         let old_entries = &self.entries;

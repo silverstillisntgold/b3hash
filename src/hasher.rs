@@ -28,27 +28,36 @@ pub struct DirectoryHasher {
     pub(crate) allow_missing_ignore: bool,
 
     #[serde(skip)]
-    progress_channel: Option<Sender<Event>>,
+    pub(crate) progress_channel: Option<Sender<Event>>,
 
     #[builder(skip)]
     #[serde(skip)]
-    cancel_handle: Option<CancelHandle>,
+    pub(crate) cancel_handle: Option<CancelHandle>,
 }
 
 impl DirectoryHasher {
     /// Attaches a [`CancelHandle`] to `self` for mid-process cancellation.
     /// Calling this multiple times will drop and override previous handles.
-    pub fn with_cancellation(mut self) -> (Self, CancelHandle) {
+    pub fn cancel_handle(&mut self) -> CancelHandle {
         let cancel_handle = CancelHandle::default();
         self.cancel_handle = Some(cancel_handle.clone());
-        (self, cancel_handle)
+        cancel_handle
     }
 
+    /// Consumes `self` to hash the contents of the given directory and return
+    /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
     #[inline(never)]
     pub fn hash(self) -> Result<Manifest, Error> {
         let entries = self.hash_internal()?;
         let manifest = self.hash_directory(entries)?;
         Ok(manifest)
+    }
+
+    /// Consumes `self` to hash the contents of the given directory and return
+    /// the hashed entries without processing them into a [`Manifest`].
+    #[inline(never)]
+    pub fn hash_entries<C: FromParallelIterator<Entry>>(self) -> Result<C, Error> {
+        self.hash_internal()
     }
 
     pub(crate) fn hash_internal<C: FromParallelIterator<Entry>>(&self) -> Result<C, Error> {
