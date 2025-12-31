@@ -79,13 +79,11 @@ impl<'a> FileFinder<'a> {
             {
                 continue;
             }
-            let metadata = unwrap_or_push_error_and_return!(entry.metadata(), errors);
-            // Prefer to use `Utf8PathBuf` because `Utf8DirEntry` contains things we don't have
-            // any use for, and it's absolutely massive on windows platforms.
+            let file_type = unwrap_or_push_error_and_return!(entry.file_type(), errors);
             let path = entry.into_path();
-            if metadata.is_file() {
+            if file_type.is_file() {
                 paths_local.push(path);
-            } else if metadata.is_dir() {
+            } else if file_type.is_dir() {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
             }
         }
