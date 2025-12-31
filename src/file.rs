@@ -19,19 +19,17 @@ pub struct FileFinder<'a> {
 
 impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
     fn from(value: &'a DirectoryHasher) -> Self {
-        let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
-        let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
         Self {
             directory_hasher: value,
-            errors,
-            paths,
+            errors: Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT)),
+            paths: Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL)),
         }
     }
 }
 
 /// Utility macro so I don't have to retype this shit.
 macro_rules! unwrap_or_push_error_and_return {
-    ($expr: expr, $errors: ident) => {
+    ($expr: expr, $errors: expr) => {
         match $expr {
             Ok(value) => value,
             Err(e) => {
@@ -43,7 +41,7 @@ macro_rules! unwrap_or_push_error_and_return {
 }
 
 impl<'a> FileFinder<'a> {
-    /// Returns a list of all visible files within the directory specified.
+    /// Returns a list of all files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
@@ -60,26 +58,20 @@ impl<'a> FileFinder<'a> {
     /// terminate immediately if `errors` contains any errors, but will finish working within their current
     /// directory if an error is pushed in some other worker during their execution.
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
-        let errors = &self.errors;
         // Kill procedure early if an error has already been encountered.
-        // Only check once to avoid excessive lock contention.
-        if !errors.lock().is_empty() {
+        // Only checked once to avoid excessive lock contention.
+        if !self.errors.lock().is_empty() {
             return;
         }
-        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), errors);
-        // Every time we need to operate on `paths` we have to lock it's mutex,
-        // so it's best to keep all our paths in a local vec and just append
-        // them in bulk after all entries have been scanned.
+        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
+        // Per-directory buffer so we only have to lock `self.paths` once.
         let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
-            let entry = unwrap_or_push_error_and_return!(entry, errors);
-            let entry_name = entry.file_name();
-            if (self.directory_hasher.respect_hidden && entry_name.starts_with(HIDDEN_ENTRY_PREFIX))
-                || entry_name == HASHFILE
-            {
+            let entry = unwrap_or_push_error_and_return!(entry, self.errors);
+            if self.should_skip(entry.file_name()) {
                 continue;
             }
-            let file_type = unwrap_or_push_error_and_return!(entry.file_type(), errors);
+            let file_type = unwrap_or_push_error_and_return!(entry.file_type(), self.errors);
             let path = entry.into_path();
             if file_type.is_file() {
                 paths_local.push(path);
@@ -88,5 +80,16 @@ impl<'a> FileFinder<'a> {
             }
         }
         self.paths.lock().extend(paths_local);
+    }
+
+    /// What do you think it does lol.
+    #[inline]
+    fn should_skip(&self, file_name: &str) -> bool {
+        // This structure generates very good asm.
+        if self.directory_hasher.respect_hidden {
+            file_name.starts_with(HIDDEN_ENTRY_PREFIX)
+        } else {
+            file_name.eq(HASHFILE)
+        }
     }
 }
