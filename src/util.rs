@@ -1,5 +1,4 @@
 use camino::Utf8PathBuf;
-use crossbeam_channel::SendError;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,10 +12,7 @@ pub enum Error {
     Cancelled,
 
     #[error(transparent)]
-    Channel(#[from] SendError<Event>),
-
-    #[error(transparent)]
-    Glob(#[from] globset::Error),
+    Channel(#[from] crossbeam_channel::SendError<Event>),
 
     #[error(transparent)]
     Hex(#[from] blake3::HexError),

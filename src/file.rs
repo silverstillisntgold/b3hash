@@ -1,35 +1,30 @@
+use crate::HASHFILE;
 use crate::hasher::DirectoryHasher;
 use crate::util::Error;
-use crate::{HASHFILE, IGNOREFILE};
-use camino::{Utf8Path, Utf8PathBuf};
-use globset::{Glob, GlobSet};
+use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 use rayon::Scope;
-use std::{fs, io};
 
 const ERROR_CAP_DEFAULT: usize = 1 << 2;
 const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
 const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
-const IGNOREFILE_COMMENT: char = '#';
 
 /// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
-    directory_path: &'a Utf8Path,
-    custom_ignore_source: Option<&'a Utf8Path>,
-    respect_hidden: bool,
-    respect_ignore: bool,
-    allow_missing_ignore: bool,
+    directory_hasher: &'a DirectoryHasher,
+    errors: Mutex<Vec<Error>>,
+    paths: Mutex<Vec<Utf8PathBuf>>,
 }
 
 impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
     fn from(value: &'a DirectoryHasher) -> Self {
+        let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
+        let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
         Self {
-            directory_path: value.directory_path.as_path(),
-            custom_ignore_source: value.custom_ignore_source.as_deref(),
-            respect_hidden: value.respect_hidden,
-            respect_ignore: value.respect_ignore,
-            allow_missing_ignore: value.allow_missing_ignore,
+            directory_hasher: value,
+            errors,
+            paths,
         }
     }
 }
@@ -51,16 +46,11 @@ impl<'a> FileFinder<'a> {
     /// Returns a list of all visible files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
-        let dir_path = self.directory_path.to_path_buf();
-        let ignore_list = self.build_ignore_list()?;
-        let errors = Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT));
-        let paths = Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL));
-        rayon::in_place_scope(|scope| {
-            self.recurse_directory(scope, dir_path, &ignore_list, &errors, &paths)
-        });
+        let root_dir_path = self.directory_hasher.directory_path.clone();
+        rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
         // If any errors were found, we only propagate the first.
-        match errors.into_inner().into_iter().next() {
-            None => Ok(paths.into_inner()),
+        match self.errors.into_inner().into_iter().next() {
+            None => Ok(self.paths.into_inner()),
             Some(e) => Err(e),
         }
     }
@@ -69,14 +59,8 @@ impl<'a> FileFinder<'a> {
     /// all directories, and sends any errors encountered into `errors`. Newly spawned instances will
     /// terminate immediately if `errors` contains any errors, but will finish working within their current
     /// directory if an error is pushed in some other worker during their execution.
-    fn recurse_directory(
-        &'a self,
-        scope: &Scope<'a>,
-        dir_path: Utf8PathBuf,
-        ignore_list: &'a Option<GlobSet>,
-        errors: &'a Mutex<Vec<Error>>,
-        paths: &'a Mutex<Vec<Utf8PathBuf>>,
-    ) {
+    fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
+        let errors = &self.errors;
         // Kill procedure early if an error has already been encountered.
         // Only check once to avoid excessive lock contention.
         if !errors.lock().is_empty() {
@@ -90,10 +74,7 @@ impl<'a> FileFinder<'a> {
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, errors);
             let entry_name = entry.file_name();
-            if (self.respect_hidden && entry_name.starts_with(HIDDEN_ENTRY_PREFIX))
-                || ignore_list
-                    .as_ref()
-                    .is_some_and(|gs| gs.is_match(entry.path().as_std_path()))
+            if (self.directory_hasher.respect_hidden && entry_name.starts_with(HIDDEN_ENTRY_PREFIX))
                 || entry_name == HASHFILE
             {
                 continue;
@@ -103,49 +84,11 @@ impl<'a> FileFinder<'a> {
             // any use for, and it's absolutely massive on windows platforms.
             let path = entry.into_path();
             if metadata.is_file() {
-                // Nested to prevent files with a size of 0 from hitting the else branch.
-                if metadata.len() > 0 {
-                    paths_local.push(path);
-                }
+                paths_local.push(path);
             } else if metadata.is_dir() {
-                scope.spawn(|new_scope| {
-                    self.recurse_directory(new_scope, path, ignore_list, errors, paths)
-                });
+                scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
             }
         }
-        paths.lock().extend(paths_local);
-    }
-
-    /// Constructs a [`GlobSet`] for ignoring files/directories using the provided ignore file.
-    fn build_ignore_list(&self) -> Result<Option<GlobSet>, Error> {
-        if self.respect_ignore {
-            let mut gs_builder = GlobSet::builder();
-            let ignore_file = match self.custom_ignore_source {
-                None => IGNOREFILE.into(),
-                Some(file_name) => file_name,
-            };
-            let ignore_file_path = self.directory_path.join(ignore_file);
-            match fs::read_to_string(ignore_file_path) {
-                Ok(s) => s
-                    .trim()
-                    .lines()
-                    .map(str::trim)
-                    .filter(|s| s.chars().next().is_some_and(|c| c != IGNOREFILE_COMMENT))
-                    .try_for_each(|glob| {
-                        let pattern = Glob::new(glob)?;
-                        gs_builder.add(pattern);
-                        Ok::<(), globset::Error>(())
-                    })?,
-                Err(e) => match e.kind() == io::ErrorKind::NotFound && self.allow_missing_ignore {
-                    true => return Ok(None),
-                    false => return Err(e.into()),
-                },
-            }
-            let gs = gs_builder.build()?;
-            if !gs.is_empty() {
-                return Ok(Some(gs));
-            }
-        }
-        Ok(None)
+        self.paths.lock().extend(paths_local);
     }
 }

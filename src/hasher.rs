@@ -16,16 +16,8 @@ pub struct DirectoryHasher {
     /// Specifies the directory which will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
 
-    pub(crate) custom_ignore_source: Option<Utf8PathBuf>,
-
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
-
-    #[builder(default = true)]
-    pub(crate) respect_ignore: bool,
-
-    #[builder(default = false)]
-    pub(crate) allow_missing_ignore: bool,
 
     #[serde(skip)]
     pub(crate) progress_channel: Option<Sender<Event>>,
@@ -151,7 +143,10 @@ impl DirectoryHasher {
             sender.send(Event::DirectoryHashingStarted)?;
         }
         for entry in &entries {
+            hasher.update(entry.path.as_str().as_bytes());
             hasher.update(entry.hash.as_bytes());
+            let b = entry.size.to_le_bytes();
+            hasher.update(&b);
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
