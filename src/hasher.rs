@@ -130,7 +130,7 @@ impl DirectoryHasher {
             directory_name,
             directory_hash,
             directory_size,
-            entries,
+            entries: entries.into(),
             directory_hasher: self,
         })
     }
