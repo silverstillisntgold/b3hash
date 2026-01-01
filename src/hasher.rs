@@ -60,8 +60,7 @@ impl DirectoryHasher {
     #[inline(never)]
     pub fn hash(self) -> Result<Manifest, Error> {
         let entries = self.hash_entries()?;
-        let manifest = self.hash_directory(entries)?;
-        Ok(manifest)
+        self.hash_directory(entries)
     }
 
     pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
@@ -89,9 +88,9 @@ impl DirectoryHasher {
             Event::FileSortingCompleted,
             Event::FileHashingStarted
         );
-        let entries = self.hash_files(file_list, prefix_len)?;
+        let entries = self.hash_files(file_list, prefix_len);
         send_if_channel!(self.progress_channel, Event::FileHashingCompleted);
-        Ok(entries)
+        entries
     }
 
     fn hash_files(
