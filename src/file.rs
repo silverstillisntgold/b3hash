@@ -33,7 +33,7 @@ macro_rules! unwrap_or_push_error_and_return {
         match $expr {
             Ok(value) => value,
             Err(e) => {
-                $errors.lock().push(e.into());
+                ($errors).lock().push(e.into());
                 return;
             }
         }
@@ -85,6 +85,12 @@ impl<'a> FileFinder<'a> {
     /// What do you think it does lol.
     #[inline]
     fn should_skip(&self, file_name: &str) -> bool {
+        const {
+            assert!(
+                HASHFILE.as_bytes()[0] == HIDDEN_ENTRY_PREFIX as u8,
+                "we're operating on the assumption that `HASHFILE` is hidden"
+            );
+        }
         if self.directory_hasher.respect_hidden {
             // The hashfile is hidden, so we don't need to explicitly
             // check for it when respecting hidden entries.
