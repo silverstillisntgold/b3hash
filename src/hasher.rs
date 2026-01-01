@@ -21,6 +21,15 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
     .into()
 }
 
+/// Convenience macro to send event(s) into the provided channel if it's `Some`.
+macro_rules! send_if_channel {
+    ($channel: expr, $($event: expr), +$(,)?) => {
+        if let Some(tx) = ($channel).as_ref() {
+            $(tx.send($event)?;)+
+        }
+    };
+}
+
 #[derive(Builder, Debug, Deserialize, Serialize)]
 pub struct DirectoryHasher {
     /// Specifies the directory which will be hashed.
@@ -57,7 +66,13 @@ impl DirectoryHasher {
 
     pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
         let prefix_len = self.prefix_len();
+        send_if_channel!(self.progress_channel, Event::FileDiscoveryStarted);
         let mut file_list = FileFinder::from(self).find()?;
+        send_if_channel!(
+            self.progress_channel,
+            Event::FileDiscoveryCompleted(file_list.len()),
+            Event::FileSortingStarted
+        );
         // Stable sorting has no use here since all paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the given prefix will be, so it's best
@@ -69,7 +84,13 @@ impl DirectoryHasher {
             let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
             a_stripped.cmp(b_stripped)
         });
+        send_if_channel!(
+            self.progress_channel,
+            Event::FileSortingCompleted,
+            Event::FileHashingStarted
+        );
         let entries = self.hash_files(file_list, prefix_len)?;
+        send_if_channel!(self.progress_channel, Event::FileHashingCompleted);
         Ok(entries)
     }
 
@@ -97,9 +118,7 @@ impl DirectoryHasher {
                 // Because we've only hashed a single file, the amount of bytes
                 // hashed represents the size of the file hashed.
                 let size = hasher.count();
-                if let Some(tx) = &self.progress_channel {
-                    tx.send(Event::FileHashed(file_path))?;
-                }
+                send_if_channel!(self.progress_channel, Event::FileHashed(file_path));
                 Ok(Entry { path, hash, size })
             })
             .collect()
@@ -113,6 +132,7 @@ impl DirectoryHasher {
             .to_string();
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
+        send_if_channel!(self.progress_channel, Event::DirectoryHashingStarted);
         // There are faster ways to do this, but this simple and in-place approach is preferred.
         for entry in &entries {
             hasher.update(entry.path.as_str().as_bytes());
@@ -121,6 +141,7 @@ impl DirectoryHasher {
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
+        send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
         self.progress_channel = None; // Close old channel.
         self.cancel_handle = None; // Drop old cancel handle.
         Ok(Manifest {
