@@ -56,12 +56,6 @@ impl DirectoryHasher {
     }
 
     pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
-        let file_list = self.find_files()?;
-        let entries = self.hash_files(file_list)?;
-        Ok(entries)
-    }
-
-    fn find_files(&self) -> Result<Vec<Utf8PathBuf>, Error> {
         let prefix_len = self.prefix_len();
         let mut file_list = FileFinder::from(self).find()?;
         // Stable sorting has no use here since all paths are unique.
@@ -75,11 +69,15 @@ impl DirectoryHasher {
             let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
             a_stripped.cmp(b_stripped)
         });
-        Ok(file_list)
+        let entries = self.hash_files(file_list, prefix_len)?;
+        Ok(entries)
     }
 
-    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
-        let prefix_len = self.prefix_len();
+    fn hash_files(
+        &self,
+        file_list: Vec<Utf8PathBuf>,
+        prefix_len: usize,
+    ) -> Result<Vec<Entry>, Error> {
         file_list
             .into_par_iter()
             .map(|file_path| {
