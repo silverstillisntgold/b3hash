@@ -5,7 +5,13 @@ use camino::Utf8PathBuf;
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Entry {
+    pub path: Utf8PathBuf,
+    pub hash: Hash,
+    pub size: u64,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
@@ -16,13 +22,6 @@ pub struct Manifest {
     pub entries: Vec<Entry>,
 
     pub(crate) directory_hasher: DirectoryHasher,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct Entry {
-    pub path: Utf8PathBuf,
-    pub hash: Hash,
-    pub size: u64,
 }
 
 impl Manifest {
@@ -37,15 +36,25 @@ impl Manifest {
     #[inline(never)]
     pub fn verify(&self) -> Result<Option<Vec<Entry>>, Error> {
         let old_entries = &self.entries;
-        let new_entries = self.directory_hasher.hash_internal::<HashSet<Entry>>()?;
+        let new_entries = self.directory_hasher.hash_entries()?;
         let missing_entries = old_entries
             .par_iter()
-            .filter(|entry| !new_entries.contains(entry))
+            .filter(|entry| {
+                new_entries
+                    .binary_search_by(|e| e.path.cmp(&entry.path))
+                    .is_err()
+            })
             .cloned()
             .collect::<Vec<Entry>>();
         Ok(match missing_entries.len() {
             0 => None,
             _ => Some(missing_entries),
         })
+    }
+
+    #[inline(never)]
+    pub fn verify_entries(&self, entries: &[Entry]) -> Result<Option<Vec<Entry>>, Error> {
+        _ = entries;
+        todo!()
     }
 }

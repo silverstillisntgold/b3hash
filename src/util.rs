@@ -36,7 +36,7 @@ pub enum Event {
     FileSortingCompleted,
 
     FileHashingStarted,
-    /// Contains the path of the hashed file.
+    /// Contains the path of the hashed file, relative to the provided root directory.
     FileHashed(Utf8PathBuf),
     FileHashingCompleted,
 

@@ -15,8 +15,10 @@ pub use crate::hasher::*;
 pub use crate::manifest::*;
 pub use crate::util::*;
 
-/// The name of file where [`Manifest`] will be serialized to.
+/// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.
 pub const HASHFILE: &str = ".b3hash";
 
 /// Current version of the manifest's format.
-pub const MANIFEST_VERSION: u64 = 1;
+///
+/// This value will always match the major version of the crate.
+pub const MANIFEST_VERSION: u64 = 0;

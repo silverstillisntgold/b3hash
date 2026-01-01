@@ -10,7 +10,6 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-/// The only required field is `directory_path`.
 #[derive(Builder, Debug, Deserialize, Serialize)]
 pub struct DirectoryHasher {
     /// Specifies the directory which will be hashed.
@@ -40,42 +39,21 @@ impl DirectoryHasher {
     /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
     #[inline(never)]
     pub fn hash(self) -> Result<Manifest, Error> {
-        let entries = self.hash_internal()?;
+        let entries = self.hash_entries()?;
         let manifest = self.hash_directory(entries)?;
         Ok(manifest)
     }
 
-    /// Consumes `self` to hash the contents of the given directory and return
-    /// the hashed entries without processing them into a [`Manifest`].
-    #[inline(never)]
-    pub fn hash_entries<C: FromParallelIterator<Entry>>(self) -> Result<C, Error> {
-        self.hash_internal()
-    }
-
-    pub(crate) fn hash_internal<C: FromParallelIterator<Entry>>(&self) -> Result<C, Error> {
-        // Ensure that we never include a leading `/` or `\` when stripping paths.
-        let prefix_len = if self.directory_path.as_str().ends_with('/')
-            || self.directory_path.as_str().ends_with('\\')
-        {
-            self.directory_path.as_str().len()
-        } else {
-            self.directory_path.as_str().len() + 1
-        };
-        let file_list = self.find_files(prefix_len)?;
-        let entries = self.hash_files(file_list, prefix_len)?;
+    pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
+        let file_list = self.find_files()?;
+        let entries = self.hash_files(file_list)?;
         Ok(entries)
     }
 
-    fn find_files(&self, prefix_len: usize) -> Result<Vec<Utf8PathBuf>, Error> {
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileDiscoveryStarted)?;
-        }
+    fn find_files(&self) -> Result<Vec<Utf8PathBuf>, Error> {
+        let prefix_len = self.prefix_len();
         let mut file_list = FileFinder::from(self).find()?;
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileDiscoveryCompleted(file_list.len()))?;
-            sender.send(Event::FileSortingStarted)?;
-        }
-        // Stable sorting has no use here since all paths will be unique.
+        // Stable sorting has no use here since all paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the given prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
@@ -86,49 +64,36 @@ impl DirectoryHasher {
             let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
             a_stripped.cmp(b_stripped)
         });
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileSortingCompleted)?;
-        }
         Ok(file_list)
     }
 
-    fn hash_files<C: FromParallelIterator<Entry>>(
-        &self,
-        file_list: Vec<Utf8PathBuf>,
-        prefix_len: usize,
-    ) -> Result<C, Error> {
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileHashingStarted)?;
-        }
-        let ret = file_list
+    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
+        let prefix_len = self.prefix_len();
+        file_list
             .into_par_iter()
-            .map_with(self, |s, file| {
-                if let Some(h) = &s.cancel_handle
-                    && h.load()
+            .map(|entry| {
+                if let Some(cancel_handle) = &self.cancel_handle
+                    && cancel_handle.load()
                 {
                     return Err(Error::Cancelled);
                 }
                 let mut hasher = Hasher::new();
-                let reader = fs::File::open(file.as_std_path())?;
-                // Calls to `Hasher::update_reader` internally buffer 64KiB of
-                // data, so we don't need to worry about doing that manually.
+                let reader = fs::File::open(entry.as_std_path())?;
                 hasher.update_reader(reader)?;
                 // SAFETY: Since all files are descendants of dir_path,
                 // they all must have dir_path as a prefix.
-                let stripped_file_path = unsafe { file.as_str().get_unchecked(prefix_len..) };
-                let path = oi_vei(stripped_file_path);
+                let stripped_file_path = unsafe { entry.as_str().get_unchecked(prefix_len..) };
+                let path = fuck_windows(stripped_file_path);
                 let hash = hasher.finalize();
+                // Because we've only hashed a single file, the amount of bytes
+                // hashed represents the size of the file hashed.
                 let size = hasher.count();
-                if let Some(sender) = &s.progress_channel {
-                    sender.send(Event::FileHashed(file))?;
+                if let Some(tx) = &self.progress_channel {
+                    tx.send(Event::FileHashed(entry))?;
                 }
                 Ok(Entry { path, hash, size })
             })
-            .collect();
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::FileHashingCompleted)?;
-        }
-        ret
+            .collect()
     }
 
     fn hash_directory(mut self, entries: Vec<Entry>) -> Result<Manifest, SendError<Event>> {
@@ -139,21 +104,15 @@ impl DirectoryHasher {
             .to_string();
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::DirectoryHashingStarted)?;
-        }
+        // There are faster ways to do this, but this simple and in-place approach is preferred.
         for entry in &entries {
             hasher.update(entry.path.as_str().as_bytes());
             hasher.update(entry.hash.as_bytes());
-            let b = entry.size.to_le_bytes();
-            hasher.update(&b);
+            hasher.update(&entry.size.to_le_bytes());
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
-        if let Some(sender) = &self.progress_channel {
-            sender.send(Event::DirectoryHashingCompleted)?;
-        }
-        // Make sure the channel/handle are closed/dropped.
+        // Make sure the old channel/handle are closed/dropped.
         self.progress_channel = None;
         self.cancel_handle = None;
         Ok(Manifest {
@@ -165,13 +124,22 @@ impl DirectoryHasher {
             directory_hasher: self,
         })
     }
+
+    /// Ensures that we never include a leading `/` or `\` when stripping paths.
+    fn prefix_len(&self) -> usize {
+        let s = self.directory_path.as_str();
+        if s.ends_with('/') || s.ends_with('\\') {
+            s.len()
+        } else {
+            s.len() + 1
+        }
+    }
 }
 
 /// Windows always has to be so funny and unique >:(
-#[inline]
-fn oi_vei(s: &str) -> Utf8PathBuf {
+fn fuck_windows(s: &str) -> Utf8PathBuf {
     if cfg!(windows) {
-        // Codegen for this shit is actually insanely good. Also fuck windows.
+        // Codegen for this shit is actually insanely good.
         s.replace('\\', "/")
     } else {
         s.to_string()
