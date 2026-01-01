@@ -5,10 +5,21 @@ use crate::util::*;
 use blake3::Hasher;
 use bon::Builder;
 use camino::Utf8PathBuf;
-use crossbeam_channel::{SendError, Sender};
+use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+
+/// Windows always has to be so funny and unique >:(
+fn fuck_windows(s: &str) -> Utf8PathBuf {
+    if cfg!(windows) {
+        // Codegen for this shit is actually insanely good.
+        s.replace('\\', "/")
+    } else {
+        s.to_string()
+    }
+    .into()
+}
 
 #[derive(Builder, Debug, Deserialize, Serialize)]
 pub struct DirectoryHasher {
@@ -96,7 +107,7 @@ impl DirectoryHasher {
             .collect()
     }
 
-    fn hash_directory(mut self, entries: Vec<Entry>) -> Result<Manifest, SendError<Event>> {
+    fn hash_directory(mut self, entries: Vec<Entry>) -> Result<Manifest, Error> {
         let directory_name = self
             .directory_path
             .file_name()
@@ -134,15 +145,4 @@ impl DirectoryHasher {
             s.len() + 1
         }
     }
-}
-
-/// Windows always has to be so funny and unique >:(
-fn fuck_windows(s: &str) -> Utf8PathBuf {
-    if cfg!(windows) {
-        // Codegen for this shit is actually insanely good.
-        s.replace('\\', "/")
-    } else {
-        s.to_string()
-    }
-    .into()
 }
