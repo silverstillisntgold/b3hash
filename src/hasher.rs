@@ -82,25 +82,25 @@ impl DirectoryHasher {
         let prefix_len = self.prefix_len();
         file_list
             .into_par_iter()
-            .map(|entry| {
+            .map(|file_path| {
                 if let Some(cancel_handle) = &self.cancel_handle
                     && cancel_handle.load()
                 {
                     return Err(Error::Cancelled);
                 }
                 let mut hasher = Hasher::new();
-                let reader = fs::File::open(entry.as_std_path())?;
+                let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
                 // SAFETY: Since all files are descendants of dir_path,
                 // they all must have dir_path as a prefix.
-                let stripped_file_path = unsafe { entry.as_str().get_unchecked(prefix_len..) };
+                let stripped_file_path = unsafe { file_path.as_str().get_unchecked(prefix_len..) };
                 let path = fuck_windows(stripped_file_path);
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of bytes
                 // hashed represents the size of the file hashed.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
-                    tx.send(Event::FileHashed(entry))?;
+                    tx.send(Event::FileHashed(file_path))?;
                 }
                 Ok(Entry { path, hash, size })
             })
@@ -123,9 +123,8 @@ impl DirectoryHasher {
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
-        // Make sure the old channel/handle are closed/dropped.
-        self.progress_channel = None;
-        self.cancel_handle = None;
+        self.progress_channel = None; // Close old channel.
+        self.cancel_handle = None; // Drop old cancel handle.
         Ok(Manifest {
             version: MANIFEST_VERSION,
             directory_name,
