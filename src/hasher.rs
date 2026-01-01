@@ -7,7 +7,6 @@ use bon::Builder;
 use camino::Utf8PathBuf;
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::fs;
 
 /// Windows always has to be so funny and unique >:(
@@ -30,7 +29,7 @@ macro_rules! send_if_channel {
     };
 }
 
-#[derive(Builder, Debug, Deserialize, Serialize)]
+#[derive(Builder, Debug)]
 pub struct DirectoryHasher {
     /// Specifies the directory which will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
@@ -38,11 +37,9 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
-    #[serde(skip)]
     pub(crate) progress_channel: Option<Sender<Event>>,
 
     #[builder(skip)]
-    #[serde(skip)]
     pub(crate) cancel_handle: Option<CancelHandle>,
 }
 
@@ -72,7 +69,7 @@ impl DirectoryHasher {
             Event::FileDiscoveryCompleted(file_list.len()),
             Event::FileSortingStarted
         );
-        // Stable sorting has no use here since all paths are unique.
+        // Stable sorting has no use here because file paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the given prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
@@ -123,7 +120,7 @@ impl DirectoryHasher {
             .collect()
     }
 
-    fn hash_directory(mut self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+    fn hash_directory(&self, entries: Vec<Entry>) -> Result<Manifest, Error> {
         let directory_name = self
             .directory_path
             .file_name()
@@ -141,15 +138,12 @@ impl DirectoryHasher {
         }
         let directory_hash = hasher.finalize();
         send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
-        self.progress_channel = None; // Close old channel.
-        self.cancel_handle = None; // Drop old cancel handle.
         Ok(Manifest {
             version: MANIFEST_VERSION,
             directory_name,
             directory_hash,
             directory_size,
             entries: entries.into(),
-            directory_hasher: self,
         })
     }
 
