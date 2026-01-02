@@ -2,7 +2,7 @@ use crate::file::FileFinder;
 use crate::manifest::{Entry, Manifest};
 use crate::util::{CancelHandle, Error, Event};
 use blake3::Hasher;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use std::fs;
@@ -18,6 +18,7 @@ macro_rules! send_if_channel {
 }
 
 /// Windows always has to be so funny and unique >:(
+#[inline]
 fn fuck_windows(s: &str) -> Utf8PathBuf {
     if cfg!(windows) {
         // Codegen for this shit is actually insanely good.
@@ -46,6 +47,30 @@ pub struct DirectoryHasher {
     /// Must be created using [`Self::cancel_handle`].
     #[builder(skip)]
     cancel_handle: Option<CancelHandle>,
+
+    /// Contains the length of `directory_path` when it is the leading
+    /// component of a file or directory beneath it.
+    ///
+    /// This ensures that we never include a leading `/` or `\` when stripping paths.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// path/  --> len == 5
+    /// 012345 --> we want to start at 5 to avoid the slash
+    ///
+    /// path   --> len == 4
+    /// 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
+    /// ```
+    #[builder(skip = {
+        let s = directory_path.as_str();
+        if s.ends_with('/') || s.ends_with('\\') {
+            s.len()
+        } else {
+            s.len() + 1
+        }
+    })]
+    prefix_len: usize,
 }
 
 impl DirectoryHasher {
@@ -66,7 +91,6 @@ impl DirectoryHasher {
     }
 
     pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
-        let prefix_len = self.prefix_len();
         send_if_channel!(self.progress_channel, Event::FileDiscoveryStarted);
         let mut file_list = FileFinder::from(self).find()?;
         send_if_channel!(
@@ -76,13 +100,10 @@ impl DirectoryHasher {
         );
         // Stable sorting has no use here because file paths are unique.
         file_list.sort_unstable_by(|a, b| {
-            // We don't know how long the given prefix will be, so it's best
+            // We don't know how long the root directory prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
-            //
-            // SAFETY: Since all files are descendants of dir_path,
-            // they all must have dir_path as a prefix.
-            let a_stripped = unsafe { a.as_str().get_unchecked(prefix_len..) };
-            let b_stripped = unsafe { b.as_str().get_unchecked(prefix_len..) };
+            let a_stripped = self.strip_prefix(a);
+            let b_stripped = self.strip_prefix(b);
             a_stripped.cmp(b_stripped)
         });
         send_if_channel!(
@@ -90,16 +111,12 @@ impl DirectoryHasher {
             Event::FileSortingCompleted,
             Event::FileHashingStarted
         );
-        let entries = self.hash_files(file_list, prefix_len);
+        let entries = self.hash_files(file_list);
         send_if_channel!(self.progress_channel, Event::FileHashingCompleted);
         entries
     }
 
-    fn hash_files(
-        &self,
-        file_list: Vec<Utf8PathBuf>,
-        prefix_len: usize,
-    ) -> Result<Vec<Entry>, Error> {
+    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
         file_list
             .into_par_iter()
             .map(|file_path| {
@@ -111,10 +128,7 @@ impl DirectoryHasher {
                 let mut hasher = Hasher::new();
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
-                // SAFETY: Since all files are descendants of dir_path,
-                // they all must have dir_path as a prefix.
-                let stripped_file_path = unsafe { file_path.as_str().get_unchecked(prefix_len..) };
-                let path = fuck_windows(stripped_file_path);
+                let path = fuck_windows(self.strip_prefix(&file_path));
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of bytes
                 // hashed represents the size of the file hashed.
@@ -151,26 +165,13 @@ impl DirectoryHasher {
         })
     }
 
-    /// Returns the length of `self.directory_path` when it is the leading
-    /// component of a file or directory beneath it.
-    ///
-    /// This ensures that we never include a leading `/` or `\` when stripping paths.
-    ///
-    /// # Example
-    ///
-    /// ```text
-    /// path/  --> len == 5
-    /// 012345 --> we want to start at 5 to avoid the slash
-    ///
-    /// path   --> len == 4
-    /// 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
-    /// ```
-    fn prefix_len(&self) -> usize {
-        let s = self.directory_path.as_str();
-        if s.ends_with('/') || s.ends_with('\\') {
-            s.len()
-        } else {
-            s.len() + 1
-        }
+    /// Strips the root directory prefix from `path`.
+    #[inline]
+    fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
+        // SAFETY: Since all files are descendants of `self.directory_path`,
+        // they all must have it as a prefix. And because `self.prefix_len`
+        // holds the index which is the start of the relative path, this will
+        // always return the entire relative path without the root directory.
+        unsafe { path.as_str().get_unchecked(self.prefix_len..) }
     }
 }

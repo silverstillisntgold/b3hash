@@ -43,7 +43,7 @@ pub enum Event {
     DirectoryHashingCompleted,
 
     DirectoryVerificationStarted,
-    /// Contains a flag signaling if the verification was a success.
+    /// Contains `true` if the verification was a success.
     DirectoryVerificationCompleted(bool),
 }
 
