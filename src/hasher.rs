@@ -150,7 +150,20 @@ impl DirectoryHasher {
         })
     }
 
-    /// Ensures that we never include a leading `/` or `\` when stripping paths.
+    /// Returns the length of `self.directory_path` when it is the
+    /// leading component of a file or directory beneath it.
+    ///
+    /// This ensures that we never include a leading `/` or `\` when stripping paths.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// path/  --> len == 5
+    /// 012345 --> we want to start at 5 to avoid the slash
+    ///
+    /// path   --> len == 4
+    /// 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
+    /// ```
     fn prefix_len(&self) -> usize {
         let s = self.directory_path.as_str();
         if s.ends_with('/') || s.ends_with('\\') {
