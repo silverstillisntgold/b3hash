@@ -15,9 +15,7 @@ mod verifier;
 pub use crate::hasher::*;
 pub use crate::manifest::*;
 pub use crate::util::{CancelHandle, Error, Event};
+pub use crate::verifier::*;
 
 /// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.
 pub const HASHFILE: &str = ".b3hash";
-
-/// Current version of the manifest's format.
-pub const MANIFEST_VERSION: u64 = 1;

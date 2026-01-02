@@ -54,7 +54,7 @@ impl CancelHandle {
     }
 
     /// Loads the value of the bool.
-    pub fn load(&self) -> bool {
+    pub(crate) fn load(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
 }

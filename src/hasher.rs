@@ -1,4 +1,3 @@
-use crate::MANIFEST_VERSION;
 use crate::file::FileFinder;
 use crate::manifest::{Entry, Manifest};
 use crate::util::{CancelHandle, Error, Event};
@@ -28,26 +27,24 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
     .into()
 }
 
-#[derive(bon::Builder, Debug)]
+#[derive(bon::Builder)]
 pub struct DirectoryHasher {
     /// Path of the directory which will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
 
     /// Should files and directories beginning with `.` be skipped?
-    ///
-    /// Defaults to `true`.
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
     /// Optional [`crossbeam_channel::Sender`] for sending internally generated
     /// instances of [`Event`] to user-held [`crossbeam_channel::Receiver`].
-    pub(crate) progress_channel: Option<Sender<Event>>,
+    progress_channel: Option<Sender<Event>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
     ///
     /// Must be created using [`Self::cancel_handle`].
     #[builder(skip)]
-    pub(crate) cancel_handle: Option<CancelHandle>,
+    cancel_handle: Option<CancelHandle>,
 }
 
 impl DirectoryHasher {
@@ -146,7 +143,6 @@ impl DirectoryHasher {
         let directory_hash = hasher.finalize();
         send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
         Ok(Manifest {
-            version: MANIFEST_VERSION,
             directory_name,
             directory_hash,
             directory_size,
