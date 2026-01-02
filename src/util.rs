@@ -41,6 +41,10 @@ pub enum Event {
 
     DirectoryHashingStarted,
     DirectoryHashingCompleted,
+
+    DirectoryVerificationStarted,
+    /// Contains a flag signaling if the verification was a success.
+    DirectoryVerificationCompleted(bool),
 }
 
 /// Pointer into an [`AtomicBool`] used to signal that an operation should be canceled early.

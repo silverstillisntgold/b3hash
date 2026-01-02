@@ -33,7 +33,7 @@ impl From<Vec<Entry>> for Entries {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Entry {
     pub path: Utf8PathBuf,
 

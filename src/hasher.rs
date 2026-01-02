@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use std::fs;
 
 /// Convenience macro to send event(s) into the provided channel if it's `Some`.
+#[macro_export]
 macro_rules! send_if_channel {
     ($channel: expr, $($event: expr), +$(,)?) => {
         if let Some(tx) = ($channel).as_ref() {
@@ -38,7 +39,7 @@ pub struct DirectoryHasher {
 
     /// Optional [`crossbeam_channel::Sender`] for sending internally generated
     /// instances of [`Event`] to user-held [`crossbeam_channel::Receiver`].
-    progress_channel: Option<Sender<Event>>,
+    pub(crate) progress_channel: Option<Sender<Event>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
     ///
@@ -150,8 +151,8 @@ impl DirectoryHasher {
         })
     }
 
-    /// Returns the length of `self.directory_path` when it is the
-    /// leading component of a file or directory beneath it.
+    /// Returns the length of `self.directory_path` when it is the leading
+    /// component of a file or directory beneath it.
     ///
     /// This ensures that we never include a leading `/` or `\` when stripping paths.
     ///
