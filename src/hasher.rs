@@ -1,13 +1,22 @@
 use crate::MANIFEST_VERSION;
 use crate::file::FileFinder;
-use crate::manifest::*;
-use crate::util::*;
+use crate::manifest::{Entry, Manifest};
+use crate::util::{CancelHandle, Error, Event};
 use blake3::Hasher;
 use bon::Builder;
 use camino::Utf8PathBuf;
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use std::fs;
+
+/// Convenience macro to send event(s) into the provided channel if it's `Some`.
+macro_rules! send_if_channel {
+    ($channel: expr, $($event: expr), +$(,)?) => {
+        if let Some(tx) = ($channel).as_ref() {
+            $(tx.send($event)?;)+
+        }
+    };
+}
 
 /// Windows always has to be so funny and unique >:(
 fn fuck_windows(s: &str) -> Utf8PathBuf {
@@ -18,15 +27,6 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
         s.to_string()
     }
     .into()
-}
-
-/// Convenience macro to send event(s) into the provided channel if it's `Some`.
-macro_rules! send_if_channel {
-    ($channel: expr, $($event: expr), +$(,)?) => {
-        if let Some(tx) = ($channel).as_ref() {
-            $(tx.send($event)?;)+
-        }
-    };
 }
 
 #[derive(Builder, Debug)]

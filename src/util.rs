@@ -2,11 +2,10 @@ use camino::Utf8PathBuf;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use thiserror::Error;
 
 /// Error type for the crate.
 #[allow(missing_docs)]
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("file hashing cancelled early")]
     Cancelled,

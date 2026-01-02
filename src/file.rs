@@ -10,6 +10,19 @@ const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
 const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 
+/// Utility macro so I don't have to retype this shit.
+macro_rules! unwrap_or_push_error_and_return {
+    ($fallible_expr: expr, $errors: expr) => {
+        match ($fallible_expr) {
+            Ok(value) => value,
+            Err(e) => {
+                ($errors).lock().push(e.into());
+                return;
+            }
+        }
+    };
+}
+
 /// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
     directory_hasher: &'a DirectoryHasher,
@@ -25,19 +38,6 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
             paths: Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL)),
         }
     }
-}
-
-/// Utility macro so I don't have to retype this shit.
-macro_rules! unwrap_or_push_error_and_return {
-    ($expr: expr, $errors: expr) => {
-        match $expr {
-            Ok(value) => value,
-            Err(e) => {
-                ($errors).lock().push(e.into());
-                return;
-            }
-        }
-    };
 }
 
 impl<'a> FileFinder<'a> {
@@ -57,6 +57,7 @@ impl<'a> FileFinder<'a> {
     /// all directories, and sends any errors encountered into `errors`. Newly spawned instances will
     /// terminate immediately if `errors` contains any errors, but will finish working within their current
     /// directory if an error is pushed in some other worker during their execution.
+    #[inline(never)]
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
         // Kill procedure early if an error has already been encountered.
         // Only checked once to avoid excessive lock contention.
