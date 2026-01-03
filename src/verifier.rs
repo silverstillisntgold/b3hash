@@ -1,5 +1,5 @@
 use crate::hasher::DirectoryHasher;
-use crate::manifest::{Entries, Entry};
+use crate::manifest::{Entry, Manifest};
 use crate::send_if_channel;
 use crate::util::{CancelHandle, Error, Event};
 use std::cmp::Ordering;
@@ -33,7 +33,7 @@ impl DiffResult {
 #[derive(bon::Builder)]
 pub struct DirectoryVerifier<'a> {
     hasher: DirectoryHasher,
-    old_entries: &'a Entries,
+    old_manifest: &'a Manifest,
 }
 
 impl<'a> DirectoryVerifier<'a> {
@@ -46,8 +46,15 @@ impl<'a> DirectoryVerifier<'a> {
     pub fn verify(self) -> Result<DiffResult, Error> {
         let mut result = DiffResult::new();
 
-        let mut old_iter = self.old_entries.iter().peekable();
-        let mut new_iter = self.hasher.hash_entries()?.into_iter().peekable();
+        let new_manifest = self.hasher.hash_internal()?;
+        if self.old_manifest.directory_size == new_manifest.directory_size
+            && self.old_manifest.directory_hash == new_manifest.directory_hash
+        {
+            return Ok(result);
+        }
+
+        let mut old_iter = self.old_manifest.entries.iter().peekable();
+        let mut new_iter = new_manifest.entries.into_iter().peekable();
 
         send_if_channel!(
             self.hasher.progress_channel,

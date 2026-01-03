@@ -97,16 +97,21 @@ impl DirectoryHasher {
 
     /// Consumes `self` to hash the contents of the given directory and return
     /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
-    #[inline(never)]
+    #[inline]
     pub fn hash(self) -> Result<Manifest, Error> {
+        self.hash_internal()
+    }
+
+    /// [`Self::hash`] but doesn't drop `self`.
+    #[inline(never)]
+    pub(crate) fn hash_internal(&self) -> Result<Manifest, Error> {
         let entries = self.hash_entries()?;
         self.hash_directory(entries)
     }
 
     /// Uses the internal `directory_path` to build a list of files to be hashed,
-    /// sort them, and hash them. Stops short of processing them into a [`Manifest`] to make
-    /// it easy for reuse in the file verification process.
-    pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
+    /// sorts them, then hashes them.
+    fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
         send_if_channel!(self.progress_channel, Event::FileDiscoveryStarted);
         let mut file_list = FileFinder::from(self).find()?;
         send_if_channel!(
@@ -159,7 +164,7 @@ impl DirectoryHasher {
     }
 
     /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
-    fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+    fn hash_directory(&self, entries: Vec<Entry>) -> Result<Manifest, Error> {
         let directory_name = self
             .directory_path
             .file_name()
@@ -180,11 +185,11 @@ impl DirectoryHasher {
         let directory_hash = hasher.finalize();
         send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
         Ok(Manifest {
-            directory_path: Some(self.directory_path),
+            directory_path: Some(self.directory_path.clone()),
             directory_name,
             directory_hash,
             directory_size,
-            entries: entries.into(),
+            entries,
         })
     }
 

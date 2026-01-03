@@ -1,70 +1,101 @@
 use crate::HASHFILE;
 use crate::util::Error;
 use blake3::Hash;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::ops::Deref;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
-    /// Contains the original path relative to program execution where
-    /// the directory being hashed is.
+    /// Contains the original path of the directory being hashed.
     #[serde(skip)]
     pub(crate) directory_path: Option<Utf8PathBuf>,
 
-    pub directory_name: String,
+    pub(crate) directory_name: String,
 
-    pub directory_hash: Hash,
+    pub(crate) directory_hash: Hash,
 
-    pub directory_size: u64,
+    pub(crate) directory_size: u64,
 
-    pub entries: Entries,
+    pub(crate) entries: Vec<Entry>,
 }
 
 impl Manifest {
+    #[inline(never)]
+    pub fn serialize_pretty(self) -> Result<bool, Error> {
+        self.serialize_internal::<true>()
+    }
+
+    #[inline(never)]
     pub fn serialize(self) -> Result<bool, Error> {
+        self.serialize_internal::<false>()
+    }
+
+    #[inline]
+    fn serialize_internal<const PRETTY: bool>(self) -> Result<bool, Error> {
         if let Some(path) = &self.directory_path {
             let path = path.join(HASHFILE);
-            let s = serde_json::to_vec(&self)?;
-            fs::write(path, s)?;
+            let data = if PRETTY {
+                serde_json::to_vec_pretty(&self)
+            } else {
+                serde_json::to_vec(&self)
+            }?;
+            fs::write(path, data)?;
             return Ok(true);
         }
         Ok(false)
     }
 
+    #[inline(never)]
     pub fn deserialize(path: Utf8PathBuf) -> Result<Manifest, Error> {
         let path = path.join(HASHFILE);
-        let s = fs::read(path)?;
-        let m = serde_json::from_slice(&s)?;
-        Ok(m)
+        let data = fs::read(path)?;
+        serde_json::from_slice(&data).map_err(|e| e.into())
     }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Entries(Vec<Entry>);
-
-impl Deref for Entries {
-    type Target = [Entry];
 
     #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.0.as_slice()
+    pub fn name(&self) -> &str {
+        &self.directory_name
     }
-}
 
-impl From<Vec<Entry>> for Entries {
     #[inline]
-    fn from(value: Vec<Entry>) -> Self {
-        Self(value)
+    pub fn hash(&self) -> &Hash {
+        &self.directory_hash
+    }
+
+    #[inline]
+    pub fn size(&self) -> u64 {
+        self.directory_size
+    }
+
+    #[inline]
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Entry {
-    pub path: Utf8PathBuf,
+    pub(crate) path: Utf8PathBuf,
 
-    pub hash: Hash,
+    pub(crate) hash: Hash,
 
-    pub size: u64,
+    pub(crate) size: u64,
+}
+
+impl Entry {
+    #[inline]
+    pub fn path(&self) -> &Utf8Path {
+        &self.path
+    }
+
+    #[inline]
+    pub fn hash(&self) -> &Hash {
+        &self.hash
+    }
+
+    #[inline]
+    pub fn size(&self) -> u64 {
+        self.size
+    }
 }
