@@ -1,6 +1,5 @@
 use crate::hasher::DirectoryHasher;
 use crate::manifest::{Entry, Manifest};
-use crate::send_if_channel;
 use crate::util::{CancelHandle, Error, Event};
 use std::cmp::Ordering;
 
@@ -8,11 +7,11 @@ const DEFAULT_CAP: usize = 1 << 7;
 
 #[derive(Debug)]
 pub struct DiffResult {
-    pub old_only: Vec<Entry>,
+    old_only: Vec<Entry>,
 
-    pub new_only: Vec<Entry>,
+    new_only: Vec<Entry>,
 
-    pub changed: Vec<(Entry, Entry)>,
+    changed: Vec<(Entry, Entry)>,
 }
 
 impl DiffResult {
@@ -33,6 +32,7 @@ impl DiffResult {
 #[derive(bon::Builder)]
 pub struct DirectoryVerifier<'a> {
     hasher: DirectoryHasher,
+
     old_manifest: &'a Manifest,
 }
 
@@ -56,10 +56,9 @@ impl<'a> DirectoryVerifier<'a> {
         let mut old_iter = self.old_manifest.entries.iter().peekable();
         let mut new_iter = new_manifest.entries.into_iter().peekable();
 
-        send_if_channel!(
-            self.hasher.progress_channel,
-            Event::DirectoryVerificationStarted
-        );
+        if let Some(tx) = &self.hasher.progress_channel {
+            tx.send(Event::DirectoryVerificationStarted)?;
+        }
         loop {
             let case = match (old_iter.peek(), new_iter.peek()) {
                 (Some(old), Some(new)) => Some(old.path.cmp(&new.path)),
@@ -86,10 +85,9 @@ impl<'a> DirectoryVerifier<'a> {
                 None => break,
             }
         }
-        send_if_channel!(
-            self.hasher.progress_channel,
-            Event::DirectoryVerificationCompleted(result.is_identical())
-        );
+        if let Some(tx) = &self.hasher.progress_channel {
+            tx.send(Event::DirectoryVerificationCompleted(result.is_identical()))?;
+        }
 
         Ok(result)
     }

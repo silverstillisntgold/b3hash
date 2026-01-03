@@ -7,16 +7,6 @@ use crossbeam_channel::Sender;
 use rayon::prelude::*;
 use std::fs;
 
-/// Convenience macro to send event(s) into the provided channel if it's `Some`.
-#[macro_export]
-macro_rules! send_if_channel {
-    ($channel: expr, $($event: expr), +$(,)?) => {
-        if let Some(tx) = ($channel).as_ref() {
-            $(tx.send($event)?;)+
-        }
-    };
-}
-
 /// Windows always has to be so funny and unique >:(
 #[inline]
 fn fuck_windows(s: &str) -> Utf8PathBuf {
@@ -102,7 +92,7 @@ impl DirectoryHasher {
         self.hash_internal()
     }
 
-    /// [`Self::hash`] but doesn't drop `self`.
+    /// Executes [`Self::hash`] without dropping `self`.
     #[inline(never)]
     pub(crate) fn hash_internal(&self) -> Result<Manifest, Error> {
         let entries = self.hash_entries()?;
@@ -112,13 +102,14 @@ impl DirectoryHasher {
     /// Uses the internal `directory_path` to build a list of files to be hashed,
     /// sorts them, then hashes them.
     fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
-        send_if_channel!(self.progress_channel, Event::FileDiscoveryStarted);
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::FileDiscoveryStarted)?;
+        }
         let mut file_list = FileFinder::from(self).find()?;
-        send_if_channel!(
-            self.progress_channel,
-            Event::FileDiscoveryCompleted(file_list.len()),
-            Event::FileSortingStarted
-        );
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::FileDiscoveryCompleted(file_list.len()))?;
+            tx.send(Event::FileSortingStarted)?;
+        }
         // Stable sorting has no use here because file paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
@@ -127,13 +118,14 @@ impl DirectoryHasher {
             let b_stripped = self.strip_prefix(b.as_path());
             a_stripped.cmp(b_stripped)
         });
-        send_if_channel!(
-            self.progress_channel,
-            Event::FileSortingCompleted,
-            Event::FileHashingStarted
-        );
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::FileSortingCompleted)?;
+            tx.send(Event::FileHashingStarted)?;
+        }
         let entries = self.hash_files(file_list);
-        send_if_channel!(self.progress_channel, Event::FileHashingCompleted);
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::FileHashingCompleted)?;
+        }
         entries
     }
 
@@ -157,7 +149,9 @@ impl DirectoryHasher {
                 // Because we've only hashed a single file, the amount of bytes
                 // hashed represents the size of the file hashed.
                 let size = hasher.count();
-                send_if_channel!(self.progress_channel, Event::FileHashed(file_path));
+                if let Some(tx) = &self.progress_channel {
+                    tx.send(Event::FileHashed(file_path))?;
+                }
                 Ok(Entry { path, hash, size })
             })
             .collect()
@@ -172,7 +166,9 @@ impl DirectoryHasher {
             .to_string();
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
-        send_if_channel!(self.progress_channel, Event::DirectoryHashingStarted);
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::DirectoryHashingStarted)?;
+        }
         // There are faster ways to do this, but this simple and non-allocating approach is preferred.
         for entry in &entries {
             // WARNING: Changing the order in which these fields are fed to
@@ -183,7 +179,9 @@ impl DirectoryHasher {
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
-        send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
+        if let Some(tx) = &self.progress_channel {
+            tx.send(Event::DirectoryHashingCompleted)?;
+        }
         Ok(Manifest {
             directory_path: Some(self.directory_path.clone()),
             directory_name,

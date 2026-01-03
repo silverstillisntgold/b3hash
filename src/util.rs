@@ -20,17 +20,9 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-/// Events which can be emitted during hashing. This enum is marked `non_exhaustive`
-/// because all it's variants can't be reached when running the hasher or verifier.
-///
-/// When hashing a directory, [`Event::DirectoryVerificationStarted`] and
-/// [`Event::DirectoryVerificationCompleted`] can't be emitted.
-///
-/// When verifying a directory, [`Event::DirectoryHashingStarted`] and
-/// [`Event::DirectoryHashingCompleted`] can't be emitted.
+/// Events which can be emitted during hashing and verifying.
 #[allow(missing_docs)]
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum Event {
     FileDiscoveryStarted,
     /// Contains the number of files discovered.
