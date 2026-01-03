@@ -29,31 +29,30 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
     .into()
 }
 
+/// Struct for hashing directory trees, should be constructed using the builder pattern.
+///
+/// The only required field is `directory_path`.
+///
+/// # Examples
+///
+/// ```rust, no-run
+/// let path: Utf8PathBuf = get_path_for_hashing();
+/// let hasher = DirectoryHasher::builder()
+///                 .directory_path(path)
+///                 .build();
+/// let manifest = hasher.hash().unwrap();
+/// ```
 #[derive(bon::Builder)]
 pub struct DirectoryHasher {
     /// Path of the directory which will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
-
-    /// Should files and directories beginning with `.` be skipped?
-    #[builder(default = true)]
-    pub(crate) respect_hidden: bool,
-
-    /// Optional [`crossbeam_channel::Sender`] for sending internally generated
-    /// instances of [`Event`] to user-held [`crossbeam_channel::Receiver`].
-    pub(crate) progress_channel: Option<Sender<Event>>,
-
-    /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
-    ///
-    /// Must be created using [`Self::cancel_handle`].
-    #[builder(skip)]
-    cancel_handle: Option<CancelHandle>,
 
     /// Contains the length of `directory_path` when it is the leading
     /// component of a file or directory beneath it.
     ///
     /// This ensures that we never include a leading `/` or `\` when stripping paths.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```text
     /// path/  --> len == 5
@@ -71,6 +70,20 @@ pub struct DirectoryHasher {
         }
     })]
     prefix_len: usize,
+
+    /// Should files and directories beginning with `.` be skipped?
+    #[builder(default = true)]
+    pub(crate) respect_hidden: bool,
+
+    /// Optional [`crossbeam_channel::Sender`] for sending internally generated
+    /// instances of [`Event`] to user-held [`crossbeam_channel::Receiver`].
+    pub(crate) progress_channel: Option<Sender<Event>>,
+
+    /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
+    ///
+    /// Must be created using [`Self::cancel_handle`].
+    #[builder(skip)]
+    cancel_handle: Option<CancelHandle>,
 }
 
 impl DirectoryHasher {
@@ -90,6 +103,9 @@ impl DirectoryHasher {
         self.hash_directory(entries)
     }
 
+    /// Uses the internal `directory_path` to build a list of files to be hashed,
+    /// sort them, and hash them. Stops short of processing them into a [`Manifest`] to make
+    /// it easy for reuse in the file verification process.
     pub(crate) fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
         send_if_channel!(self.progress_channel, Event::FileDiscoveryStarted);
         let mut file_list = FileFinder::from(self).find()?;
@@ -102,8 +118,8 @@ impl DirectoryHasher {
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
-            let a_stripped = self.strip_prefix(a);
-            let b_stripped = self.strip_prefix(b);
+            let a_stripped = self.strip_prefix(a.as_path());
+            let b_stripped = self.strip_prefix(b.as_path());
             a_stripped.cmp(b_stripped)
         });
         send_if_channel!(
@@ -116,6 +132,9 @@ impl DirectoryHasher {
         entries
     }
 
+    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by
+    /// hashing the file located at the target path. Can be terminated early if
+    /// the user has acquired a [`CancelHandle`].
     fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
         file_list
             .into_par_iter()
@@ -128,7 +147,7 @@ impl DirectoryHasher {
                 let mut hasher = Hasher::new();
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
-                let path = fuck_windows(self.strip_prefix(&file_path));
+                let path = fuck_windows(self.strip_prefix(file_path.as_path()));
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of bytes
                 // hashed represents the size of the file hashed.
@@ -139,7 +158,8 @@ impl DirectoryHasher {
             .collect()
     }
 
-    fn hash_directory(&self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+    /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
+    fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, Error> {
         let directory_name = self
             .directory_path
             .file_name()
@@ -148,8 +168,10 @@ impl DirectoryHasher {
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
         send_if_channel!(self.progress_channel, Event::DirectoryHashingStarted);
-        // There are faster ways to do this, but this simple and in-place approach is preferred.
+        // There are faster ways to do this, but this simple and non-allocating approach is preferred.
         for entry in &entries {
+            // WARNING: Changing the order in which these fields are fed to
+            // the hasher will change the final value of `directory_hash`.
             hasher.update(entry.path.as_str().as_bytes());
             hasher.update(entry.hash.as_bytes());
             hasher.update(&entry.size.to_le_bytes());
@@ -158,6 +180,7 @@ impl DirectoryHasher {
         let directory_hash = hasher.finalize();
         send_if_channel!(self.progress_channel, Event::DirectoryHashingCompleted);
         Ok(Manifest {
+            directory_path: Some(self.directory_path),
             directory_name,
             directory_hash,
             directory_size,
@@ -165,7 +188,7 @@ impl DirectoryHasher {
         })
     }
 
-    /// Strips the root directory prefix from `path`.
+    /// Strips the root directory prefix (including it's trailing slash) from `path`.
     #[inline]
     fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
         // SAFETY: Since all files are descendants of `self.directory_path`,

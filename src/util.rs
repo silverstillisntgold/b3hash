@@ -26,7 +26,7 @@ pub enum Error {
 /// When hashing a directory, [`Event::DirectoryVerificationStarted`] and
 /// [`Event::DirectoryVerificationCompleted`] can't be emitted.
 ///
-/// When verifying a direction, [`Event::DirectoryHashingStarted`] and
+/// When verifying a directory, [`Event::DirectoryHashingStarted`] and
 /// [`Event::DirectoryHashingCompleted`] can't be emitted.
 #[allow(missing_docs)]
 #[derive(Debug)]
