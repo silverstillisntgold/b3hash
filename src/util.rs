@@ -14,18 +14,23 @@ pub enum Error {
     Channel(#[from] crossbeam_channel::SendError<Event>),
 
     #[error(transparent)]
-    Hex(#[from] blake3::HexError),
-
-    #[error(transparent)]
     Io(#[from] io::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
 
-/// Events which can be emitted during hashing.
+/// Events which can be emitted during hashing. This enum is marked `non_exhaustive`
+/// because all it's variants can't be reached when running the hasher or verifier.
+///
+/// When hashing a directory, [`Event::DirectoryVerificationStarted`] and
+/// [`Event::DirectoryVerificationCompleted`] can't be emitted.
+///
+/// When verifying a direction, [`Event::DirectoryHashingStarted`] and
+/// [`Event::DirectoryHashingCompleted`] can't be emitted.
 #[allow(missing_docs)]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Event {
     FileDiscoveryStarted,
     /// Contains the number of files discovered.
