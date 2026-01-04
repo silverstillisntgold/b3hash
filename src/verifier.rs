@@ -46,7 +46,7 @@ impl<'a> DirectoryVerifier<'a> {
     pub fn verify(self) -> Result<DiffResult, Error> {
         let mut result = DiffResult::new();
 
-        let new_manifest = self.hasher.hash_internal()?;
+        let new_manifest = self.hasher.hash()?;
         if self.old_manifest.directory_size == new_manifest.directory_size
             && self.old_manifest.directory_hash == new_manifest.directory_hash
         {

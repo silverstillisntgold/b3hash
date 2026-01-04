@@ -87,15 +87,9 @@ impl DirectoryHasher {
 
     /// Consumes `self` to hash the contents of the given directory and return
     /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
-    #[inline]
-    pub fn hash(self) -> Result<Manifest, Error> {
-        self.hash_internal()
-    }
-
-    /// Executes [`Self::hash`] without dropping `self`.
     #[inline(never)]
-    pub(crate) fn hash_internal(&self) -> Result<Manifest, Error> {
-        let mut file_list = FileFinder::from(self).find()?;
+    pub fn hash(self) -> Result<Manifest, Error> {
+        let mut file_list = FileFinder::from(&self).find()?;
         // Stable sorting has no use here because file paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
