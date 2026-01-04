@@ -67,7 +67,7 @@ pub struct DirectoryHasher {
 
     /// Optional [`crossbeam_channel::Sender`] for sending paths of hashed
     /// files to a user-held [`crossbeam_channel::Receiver`].
-    pub(crate) progress_channel: Option<Sender<Utf8PathBuf>>,
+    progress_channel: Option<Sender<Utf8PathBuf>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
     ///
