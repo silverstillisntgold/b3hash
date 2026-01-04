@@ -1,6 +1,6 @@
 use crate::file::FileFinder;
 use crate::manifest::{Entry, Manifest};
-use crate::util::{CancelHandle, Error, Event};
+use crate::util::{CancelHandle, Error};
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::Sender;
@@ -65,9 +65,9 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
-    /// Optional [`crossbeam_channel::Sender`] for sending internally generated
-    /// instances of [`Event`] to user-held [`crossbeam_channel::Receiver`].
-    pub(crate) progress_channel: Option<Sender<Event>>,
+    /// Optional [`crossbeam_channel::Sender`] for sending paths of hashed
+    /// files to a user-held [`crossbeam_channel::Receiver`].
+    pub(crate) progress_channel: Option<Sender<Utf8PathBuf>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
     ///
@@ -95,21 +95,7 @@ impl DirectoryHasher {
     /// Executes [`Self::hash`] without dropping `self`.
     #[inline(never)]
     pub(crate) fn hash_internal(&self) -> Result<Manifest, Error> {
-        let entries = self.hash_entries()?;
-        self.hash_directory(entries)
-    }
-
-    /// Uses the internal `directory_path` to build a list of files to be hashed,
-    /// sorts them, then hashes them.
-    fn hash_entries(&self) -> Result<Vec<Entry>, Error> {
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::FileDiscoveryStarted)?;
-        }
         let mut file_list = FileFinder::from(self).find()?;
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::FileDiscoveryCompleted(file_list.len()))?;
-            tx.send(Event::FileSortingStarted)?;
-        }
         // Stable sorting has no use here because file paths are unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
@@ -118,15 +104,8 @@ impl DirectoryHasher {
             let b_stripped = self.strip_prefix(b.as_path());
             a_stripped.cmp(b_stripped)
         });
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::FileSortingCompleted)?;
-            tx.send(Event::FileHashingStarted)?;
-        }
-        let entries = self.hash_files(file_list);
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::FileHashingCompleted)?;
-        }
-        entries
+        let entries = self.hash_files(file_list)?;
+        self.hash_directory(entries)
     }
 
     /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by
@@ -150,7 +129,7 @@ impl DirectoryHasher {
                 // hashed represents the size of the file hashed.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
-                    tx.send(Event::FileHashed(file_path))?;
+                    tx.send(file_path)?;
                 }
                 Ok(Entry { path, hash, size })
             })
@@ -166,9 +145,6 @@ impl DirectoryHasher {
             .to_string();
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::DirectoryHashingStarted)?;
-        }
         // There are faster ways to do this, but this simple and non-allocating approach is preferred.
         for entry in &entries {
             // WARNING: Changing the order in which these fields are fed to
@@ -179,9 +155,6 @@ impl DirectoryHasher {
             directory_size += entry.size;
         }
         let directory_hash = hasher.finalize();
-        if let Some(tx) = &self.progress_channel {
-            tx.send(Event::DirectoryHashingCompleted)?;
-        }
         Ok(Manifest {
             directory_path: Some(self.directory_path.clone()),
             directory_name,

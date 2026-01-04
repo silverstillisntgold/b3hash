@@ -1,6 +1,6 @@
 use crate::hasher::DirectoryHasher;
 use crate::manifest::{Entry, Manifest};
-use crate::util::{CancelHandle, Error, Event};
+use crate::util::{CancelHandle, Error};
 use std::cmp::Ordering;
 
 const DEFAULT_CAP: usize = 1 << 7;
@@ -56,9 +56,6 @@ impl<'a> DirectoryVerifier<'a> {
         let mut old_iter = self.old_manifest.entries.iter().peekable();
         let mut new_iter = new_manifest.entries.into_iter().peekable();
 
-        if let Some(tx) = &self.hasher.progress_channel {
-            tx.send(Event::DirectoryVerificationStarted)?;
-        }
         loop {
             let case = match (old_iter.peek(), new_iter.peek()) {
                 (Some(old), Some(new)) => Some(old.path.cmp(&new.path)),
@@ -84,9 +81,6 @@ impl<'a> DirectoryVerifier<'a> {
                 }
                 None => break,
             }
-        }
-        if let Some(tx) = &self.hasher.progress_channel {
-            tx.send(Event::DirectoryVerificationCompleted(result.is_identical()))?;
         }
 
         Ok(result)

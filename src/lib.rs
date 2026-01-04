@@ -14,7 +14,7 @@ mod verifier;
 
 pub use crate::hasher::*;
 pub use crate::manifest::*;
-pub use crate::util::{CancelHandle, Error, Event};
+pub use crate::util::*;
 pub use crate::verifier::*;
 
 /// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.

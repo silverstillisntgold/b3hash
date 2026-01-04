@@ -11,37 +11,13 @@ pub enum Error {
     Cancelled,
 
     #[error(transparent)]
-    Channel(#[from] crossbeam_channel::SendError<Event>),
+    Channel(#[from] crossbeam_channel::SendError<Utf8PathBuf>),
 
     #[error(transparent)]
     Io(#[from] io::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-}
-
-/// Events which can be emitted during hashing and verifying.
-#[allow(missing_docs)]
-#[derive(Debug)]
-pub enum Event {
-    FileDiscoveryStarted,
-    /// Contains the number of files discovered.
-    FileDiscoveryCompleted(usize),
-
-    FileSortingStarted,
-    FileSortingCompleted,
-
-    FileHashingStarted,
-    /// Contains the path of the hashed file, relative to the provided root directory.
-    FileHashed(Utf8PathBuf),
-    FileHashingCompleted,
-
-    DirectoryHashingStarted,
-    DirectoryHashingCompleted,
-
-    DirectoryVerificationStarted,
-    /// Contains `true` if the verification was a success.
-    DirectoryVerificationCompleted(bool),
 }
 
 /// Pointer into an [`AtomicBool`] used to signal that an operation should be canceled early.
