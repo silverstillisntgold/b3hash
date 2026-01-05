@@ -53,19 +53,16 @@ impl<'a> FileFinder<'a> {
         }
     }
 
-    /// For directory `dir_path`, sends all file paths into `paths`, spawns a new parallel instance for
-    /// all directories, and sends any errors encountered into `errors`. Newly spawned instances will
-    /// terminate immediately if `errors` contains any errors, but will finish working within their current
-    /// directory if an error is pushed in some other worker during their execution.
+    /// Iterates over all files and folders in `dir_path`, appending the paths of files to the internal
+    /// `self.paths` buffer and spawning new `recurse_directory` instances for each new directory.
     #[inline(never)]
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
-        // Kill procedure early if an error has already been encountered.
-        // Only checked once to avoid excessive lock contention.
+        // Only checked once to minimize lock contention.
         if !self.errors.lock().is_empty() {
             return;
         }
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
-        // Per-directory buffer so we only have to lock `self.paths` once.
+        // Per-directory buffer so we only need to lock `self.paths` once.
         let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, self.errors);
