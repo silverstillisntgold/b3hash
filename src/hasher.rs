@@ -5,7 +5,49 @@ use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
-use std::fs;
+use std::thread::JoinHandle;
+use std::{fs, thread};
+
+pub struct DirectoryHasherIter {
+    rx: crossbeam_channel::Receiver<Utf8PathBuf>,
+    cancel_handle: CancelHandle,
+    manifest: JoinHandle<Result<Manifest, Error>>,
+}
+
+impl Iterator for DirectoryHasherIter {
+    type Item = Utf8PathBuf;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.rx.recv().ok()
+    }
+}
+
+impl DirectoryHasherIter {
+    /// Cancels the hashing operation.
+    pub fn cancel(self) {
+        // Need to clone here or `into_manifest` fails with a "partially moved value" error.
+        self.cancel_handle.clone().cancel();
+        // Very important we do this, otherwise we end up with a detached thread.
+        let _discard = self.into_manifest();
+    }
+
+    /// Consumes the iterator and returns the resulting [`Manifest`], performing
+    /// function `f` on all paths received from the iterator.
+    pub fn consume<F>(mut self, f: F) -> Result<Manifest, Error>
+    where
+        F: Fn(Utf8PathBuf),
+    {
+        for path in &mut self {
+            f(path);
+        }
+        self.manifest.join().unwrap()
+    }
+
+    /// Consumes the iterator and returns the resulting [`Manifest`].
+    pub fn into_manifest(self) -> Result<Manifest, Error> {
+        self.consume(|_| ())
+    }
+}
 
 /// Windows always has to be so funny and unique >:(
 #[inline]
@@ -74,6 +116,25 @@ pub struct DirectoryHasher {
     /// Must be created using [`Self::cancel_handle`].
     #[builder(skip)]
     cancel_handle: Option<CancelHandle>,
+}
+
+impl IntoIterator for DirectoryHasher {
+    type Item = Utf8PathBuf;
+    type IntoIter = DirectoryHasherIter;
+
+    fn into_iter(mut self) -> Self::IntoIter {
+        // Using a bounded, 0-length channel so the backing computation
+        // thread only progresses when calling `next` on the iterator.
+        let (tx, rx) = crossbeam_channel::bounded(0);
+        self.progress_channel = Some(tx);
+        let cancel_handle = self.cancel_handle();
+        let manifest = thread::spawn(|| self.hash());
+        DirectoryHasherIter {
+            rx,
+            cancel_handle,
+            manifest,
+        }
+    }
 }
 
 impl DirectoryHasher {
