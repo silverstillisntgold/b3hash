@@ -1,0 +1,231 @@
+use crate::file::FileFinder;
+use crate::manifest::{Entry, Manifest};
+use crate::util::{CancelHandle, Error};
+use blake3::Hasher;
+use camino::{Utf8Path, Utf8PathBuf};
+use crossbeam_channel::Sender;
+use rayon::prelude::*;
+use std::thread::JoinHandle;
+use std::{fs, thread};
+
+pub struct DirectoryHasherIter {
+    rx: crossbeam_channel::Receiver<Utf8PathBuf>,
+    cancel_handle: CancelHandle,
+    manifest: JoinHandle<Result<Manifest, Error>>,
+}
+
+impl Iterator for DirectoryHasherIter {
+    type Item = Utf8PathBuf;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.rx.recv().ok()
+    }
+}
+
+impl DirectoryHasherIter {
+    /// Cancels the hashing operation.
+    pub fn cancel(self) {
+        // Need to clone here or `into_manifest` fails with a "partially moved value" error.
+        self.cancel_handle.clone().cancel();
+        // Very important we do this, otherwise we end up with a detached thread.
+        let _discard = self.into_manifest();
+    }
+
+    /// Consumes the iterator and returns the resulting [`Manifest`], performing
+    /// function `f` on all paths received from the iterator.
+    pub fn consume<F>(mut self, f: F) -> Result<Manifest, Error>
+    where
+        F: Fn(Utf8PathBuf),
+    {
+        for path in &mut self {
+            f(path);
+        }
+        self.manifest.join().unwrap()
+    }
+
+    /// Consumes the iterator and returns the resulting [`Manifest`].
+    pub fn into_manifest(self) -> Result<Manifest, Error> {
+        self.consume(|_| ())
+    }
+}
+
+/// Windows always has to be so funny and unique >:(
+#[inline]
+fn fuck_windows(s: &str) -> Utf8PathBuf {
+    if cfg!(windows) {
+        // Codegen for this shit is actually insanely good.
+        s.replace('\\', "/")
+    } else {
+        s.to_string()
+    }
+    .into()
+}
+
+/// Struct for hashing directory trees, should be constructed using the builder pattern.
+///
+/// The only required field is `directory_path`.
+///
+/// # Examples
+///
+/// ```rust, no-run
+/// let path: Utf8PathBuf = get_path_for_hashing();
+/// let hasher = DirectoryHasher::builder()
+///                 .directory_path(path)
+///                 .build();
+/// let manifest = hasher.hash().unwrap();
+/// ```
+#[derive(bon::Builder)]
+pub struct DirectoryHasher {
+    /// Path of the directory which will be hashed.
+    pub(crate) directory_path: Utf8PathBuf,
+
+    /// Contains the length of `directory_path` when it is the leading
+    /// component of a file or directory beneath it.
+    ///
+    /// This ensures that we never include a leading `/` or `\` when stripping paths.
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// path/  --> len == 5
+    /// 012345 --> we want to start at 5 to avoid the slash
+    ///
+    /// path   --> len == 4
+    /// 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
+    /// ```
+    #[builder(skip = {
+        let s = directory_path.as_str();
+        if s.ends_with('/') || s.ends_with('\\') {
+            s.len()
+        } else {
+            s.len() + 1
+        }
+    })]
+    prefix_len: usize,
+
+    /// Should files and directories beginning with `.` be skipped?
+    #[builder(default = true)]
+    pub(crate) respect_hidden: bool,
+
+    /// Optional [`crossbeam_channel::Sender`] for sending paths of hashed
+    /// files to a user-held [`crossbeam_channel::Receiver`].
+    progress_channel: Option<Sender<Utf8PathBuf>>,
+
+    /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
+    ///
+    /// Must be created using [`Self::cancel_handle`].
+    #[builder(skip)]
+    cancel_handle: Option<CancelHandle>,
+}
+
+impl IntoIterator for DirectoryHasher {
+    type Item = Utf8PathBuf;
+    type IntoIter = DirectoryHasherIter;
+
+    fn into_iter(mut self) -> Self::IntoIter {
+        // Using a bounded, 0-length channel so the backing computation
+        // thread only progresses when calling `next` on the iterator.
+        let (tx, rx) = crossbeam_channel::bounded(0);
+        self.progress_channel = Some(tx);
+        let cancel_handle = self.cancel_handle();
+        let manifest = thread::spawn(|| self.hash());
+        DirectoryHasherIter {
+            rx,
+            cancel_handle,
+            manifest,
+        }
+    }
+}
+
+impl DirectoryHasher {
+    /// Attaches a [`CancelHandle`] to `self` for mid-process cancellation.
+    /// Calling this multiple times will drop and override previous handles.
+    pub fn cancel_handle(&mut self) -> CancelHandle {
+        let cancel_handle = CancelHandle::default();
+        self.cancel_handle = Some(cancel_handle.clone());
+        cancel_handle
+    }
+
+    /// Consumes `self` to hash the contents of the given directory and return
+    /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
+    #[inline(never)]
+    pub fn hash(self) -> Result<Manifest, Error> {
+        let mut file_list = FileFinder::from(&self).find()?;
+        // Stable sorting has no use here because file paths are unique.
+        file_list.sort_unstable_by(|a, b| {
+            // We don't know how long the root directory prefix will be, so it's best
+            // to strip it out to minimize the time spent sorting.
+            let a_stripped = self.strip_prefix(a.as_path());
+            let b_stripped = self.strip_prefix(b.as_path());
+            a_stripped.cmp(b_stripped)
+        });
+        let entries = self.hash_files(file_list)?;
+        self.hash_directory(entries)
+    }
+
+    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by
+    /// hashing the file located at the target path. Can be terminated early if
+    /// the user has acquired a [`CancelHandle`].
+    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
+        file_list
+            .into_par_iter()
+            .map(|file_path| {
+                if let Some(cancel_handle) = &self.cancel_handle
+                    && cancel_handle.load()
+                {
+                    return Err(Error::Cancelled);
+                }
+                let mut hasher = Hasher::new();
+                let reader = fs::File::open(file_path.as_std_path())?;
+                hasher.update_reader(reader)?;
+                let path = fuck_windows(self.strip_prefix(file_path.as_path()));
+                let hash = hasher.finalize();
+                // Because we've only hashed a single file, the amount of bytes
+                // hashed represents the size of the file hashed.
+                let size = hasher.count();
+                if let Some(tx) = &self.progress_channel {
+                    tx.send(file_path)?;
+                }
+                Ok(Entry { path, hash, size })
+            })
+            .collect()
+    }
+
+    /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
+    fn hash_directory(&self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+        let directory_name = self
+            .directory_path
+            .file_name()
+            .unwrap_or(self.directory_path.as_str())
+            .to_string();
+        let mut hasher = Hasher::new();
+        let mut directory_size = 0;
+        // There are faster ways to do this, but this simple and non-allocating approach is preferred.
+        for entry in &entries {
+            // WARNING: Changing the order in which these fields are fed to
+            // the hasher will change the final value of `directory_hash`.
+            hasher.update(entry.path.as_str().as_bytes());
+            hasher.update(entry.hash.as_bytes());
+            hasher.update(&entry.size.to_le_bytes());
+            directory_size += entry.size;
+        }
+        let directory_hash = hasher.finalize();
+        Ok(Manifest {
+            directory_path: Some(self.directory_path.clone()),
+            directory_name,
+            directory_hash,
+            directory_size,
+            entries,
+        })
+    }
+
+    /// Strips the root directory prefix (including it's trailing slash) from `path`.
+    #[inline]
+    fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
+        // SAFETY: Since all files are descendants of `self.directory_path`,
+        // they all must have it as a prefix. And because `self.prefix_len`
+        // holds the index which is the start of the relative path, this will
+        // always return the entire relative path without the root directory.
+        unsafe { path.as_str().get_unchecked(self.prefix_len..) }
+    }
+}
