@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("file hashing cancelled early")]
-    Cancelled,
+    #[error("file hashing canceled early")]
+    Canceled,
 
     #[error(transparent)]
     Channel(#[from] crossbeam_channel::SendError<Utf8PathBuf>),
@@ -21,22 +21,17 @@ pub enum Error {
 }
 
 /// Pointer to an [`AtomicBool`], used to signal that an operation should be canceled early.
-///
-/// It is entirely safe to pass around many clones of a handle.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct CancelHandle(Arc<AtomicBool>);
 
 impl CancelHandle {
-    /// Cancels the associated operation and drops `self`.
-    ///
-    /// This method is idempotent, so calling it multiple times from different
-    /// handle clones does nothing beyond the first call.
-    pub fn cancel(self) {
+    /// Cancels the associated operation.
+    pub fn cancel(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
 
     /// Loads the value from the bool.
-    pub(crate) fn load(&self) -> bool {
+    pub fn load(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
 }

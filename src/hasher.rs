@@ -22,12 +22,16 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 
 /// Iterator over all files hashed by the constructing [`DirectoryHasher`].
 ///
-/// File paths are relative to their root directory, and the order in which are they are received
-/// is entirely non-deterministic.
+/// File paths are relative to their root directory, and the order in which they
+/// are received is non-deterministic.
+///
+/// # Warning
 ///
 /// Because this type contains a [`JoinHandle`], dropping it mid-process causes the handle to become detached.
 /// The iterator should always be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
-/// [`Self::cancel`] can be used to cancel hashing early and safely terminate the backing thread.
+///
+/// If you are using standard [`Iterator`] functions to consume the iterator, you **must** call
+/// [`Self::cancel`] or [`Self::into_manifest`] after the iterator is exhausted.
 ///
 /// # Examples
 ///
@@ -56,10 +60,9 @@ impl Iterator for DirectoryHasherIter {
 }
 
 impl DirectoryHasherIter {
-    /// Cancels the hashing operation and closes the backing thread.
+    /// Cancels file hashing (if any files remain) and closes the backing thread.
     pub fn cancel(self) {
-        // Need to clone here or `into_manifest` fails with a "partially moved value" error.
-        self.cancel_handle.clone().cancel();
+        self.cancel_handle.cancel();
         // Make sure the thread is joined, otherwise it ends up detached.
         let _discard = self.into_manifest();
     }
@@ -90,14 +93,9 @@ impl DirectoryHasherIter {
 /// should be hashed. By default, hidden files and directories will be ignored, but this can be
 /// modified with [`DirectoryHasherBuilder::respect_hidden`].
 ///
-/// If you would like to monitor which files are being hashed, [`DirectoryHasherBuilder::progress_channel`]
-/// allows for the sending side of a crossbeam channel to be attached to the hashing process, but using this
-/// will likely require you to spawn the hashing process into it's own background thread. It's more likely that
-/// you want to use the [`IntoIterator`] implementation, which provides a [`DirectoryHasherIter`] and makes
-/// it easy to process the resulting file paths as the files are hashed.
-///
-/// [`Self::cancel_handle`] provide a handle which allows for early termination during hashing. It can only be
-/// called on a built [`DirectoryHasher`].
+/// If you would like to monitor which files are being hashed, the [`IntoIterator`]
+/// implementation provides a [`DirectoryHasherIter`] and makes it easy to process the
+/// resulting file paths as files are hashed.
 ///
 /// # Examples
 ///
@@ -144,7 +142,8 @@ pub struct DirectoryHasher {
     /// Optional [`crossbeam_channel::Sender`] for sending paths of
     /// hashed files to a [`crossbeam_channel::Receiver`].
     ///
-    /// The order in which file paths are sent over this channel is entirely non-deterministic.
+    /// The order in which file paths are sent over this channel is non-deterministic.
+    #[builder(skip)]
     progress_channel: Option<Sender<Utf8PathBuf>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
@@ -174,14 +173,6 @@ impl IntoIterator for DirectoryHasher {
 }
 
 impl DirectoryHasher {
-    /// Attaches a [`CancelHandle`] to `self` for mid-process cancellation.
-    /// Calling this multiple times will drop and override previous handles.
-    pub fn cancel_handle(&mut self) -> CancelHandle {
-        let cancel_handle = CancelHandle::default();
-        self.cancel_handle = Some(cancel_handle.clone());
-        cancel_handle
-    }
-
     /// Consumes `self` to hash the contents of the given directory
     /// and returns the resulting [`Manifest`].
     #[inline(never)]
@@ -210,7 +201,7 @@ impl DirectoryHasher {
                 if let Some(cancel_handle) = &self.cancel_handle
                     && cancel_handle.load()
                 {
-                    return Err(Error::Cancelled);
+                    return Err(Error::Canceled);
                 }
                 let mut hasher = Hasher::new();
                 let reader = fs::File::open(file_path.as_std_path())?;
@@ -264,5 +255,12 @@ impl DirectoryHasher {
         // holds the index which is the start of the relative path, this will
         // always return the entire relative path without the root directory.
         unsafe { path.as_str().get_unchecked(self.prefix_len..) }
+    }
+
+    /// Attaches a [`CancelHandle`] to `self` for mid-process cancellation.
+    fn cancel_handle(&mut self) -> CancelHandle {
+        let cancel_handle = CancelHandle::default();
+        self.cancel_handle = Some(cancel_handle.clone());
+        cancel_handle
     }
 }
