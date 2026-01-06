@@ -20,17 +20,22 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-/// Pointer into an [`AtomicBool`] used to signal that an operation should be canceled early.
+/// Pointer to an [`AtomicBool`], used to signal that an operation should be canceled early.
+///
+/// It is entirely safe to pass around many clones of a handle.
 #[derive(Clone, Debug, Default)]
 pub struct CancelHandle(Arc<AtomicBool>);
 
 impl CancelHandle {
     /// Cancels the associated operation and drops `self`.
+    ///
+    /// This method is idempotent, so calling it multiple times from different
+    /// handle clones does nothing beyond the first call.
     pub fn cancel(self) {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    /// Loads the value of the bool.
+    /// Loads the value from the bool.
     pub(crate) fn load(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }

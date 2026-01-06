@@ -8,10 +8,30 @@ use rayon::prelude::*;
 use std::thread::JoinHandle;
 use std::{fs, thread};
 
+/// Windows always has to be so funny and unique >:(
+#[inline]
+fn fuck_windows(s: &str) -> Utf8PathBuf {
+    if cfg!(windows) {
+        // Codegen for this shit is actually insanely good.
+        s.replace('\\', "/")
+    } else {
+        s.to_string()
+    }
+    .into()
+}
+
+/// Iterator over all files hashed by the constructing [`DirectoryHasher`].
+///
+/// File paths are relative to their root directory, and the order in which are they are received
+/// is entirely non-deterministic.
+///
+/// Because this type contains a [`JoinHandle`], dropping it mid-process causes the handle to become detached.
+/// The iterator should always be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
+/// [`Self::cancel`] can be used to cancel hashing early and safely closes the backing thread.
 pub struct DirectoryHasherIter {
     rx: crossbeam_channel::Receiver<Utf8PathBuf>,
     cancel_handle: CancelHandle,
-    manifest: JoinHandle<Result<Manifest, Error>>,
+    manifest_handle: JoinHandle<Result<Manifest, Error>>,
 }
 
 impl Iterator for DirectoryHasherIter {
@@ -27,52 +47,54 @@ impl DirectoryHasherIter {
     pub fn cancel(self) {
         // Need to clone here or `into_manifest` fails with a "partially moved value" error.
         self.cancel_handle.clone().cancel();
-        // Very important we do this, otherwise we end up with a detached thread.
+        // Need to make sure the thread is joined, otherwise it ends up detached.
         let _discard = self.into_manifest();
+    }
+
+    /// Consumes the iterator and returns the resulting [`Manifest`].
+    pub fn into_manifest(self) -> Result<Manifest, Error> {
+        self.into_manifest_with(|_| {})
     }
 
     /// Consumes the iterator and returns the resulting [`Manifest`], performing
     /// function `f` on all paths received from the iterator.
-    pub fn consume<F>(mut self, f: F) -> Result<Manifest, Error>
+    pub fn into_manifest_with<F>(mut self, f: F) -> Result<Manifest, Error>
     where
         F: Fn(Utf8PathBuf),
     {
         for path in &mut self {
             f(path);
         }
-        self.manifest.join().unwrap()
-    }
-
-    /// Consumes the iterator and returns the resulting [`Manifest`].
-    pub fn into_manifest(self) -> Result<Manifest, Error> {
-        self.consume(|_| ())
+        // Because we never unwrap/expect anywhere else, this should only fail when
+        // we have an underlying library failure, which we can't handle anyway.
+        self.manifest_handle.join().unwrap()
     }
 }
 
-/// Windows always has to be so funny and unique >:(
-#[inline]
-fn fuck_windows(s: &str) -> Utf8PathBuf {
-    if cfg!(windows) {
-        // Codegen for this shit is actually insanely good.
-        s.replace('\\', "/")
-    } else {
-        s.to_string()
-    }
-    .into()
-}
-
-/// Struct for hashing directory trees, should be constructed using the builder pattern.
+/// Struct for hashing directory trees, should be constructed with [`Self::builder`].
 ///
-/// The only required field is `directory_path`.
+/// The only required field is `directory_path`, which specifies the directory whose contents
+/// should be hashed. By default, hidden files and directories will be ignored, but this can be
+/// modified with [`DirectoryHasherBuilder::respect_hidden`].
+///
+/// If you would like to monitor which files are being hashed, [`DirectoryHasherBuilder::progress_channel`]
+/// allows for the sending side of a crossbeam channel to be attached to the hashing process, but using this
+/// will likely require you to spawn the hashing process into it's own background thread. It's more likely that
+/// you want to use the [`IntoIterator`] implementation, which provides a [`DirectoryHasherIter`] and makes
+/// it easy to process the resulting file paths as the files are hashed.
+///
+/// [`Self::cancel_handle`] provide a handle which allows for early termination during hashing. It can only be
+/// called on a built [`DirectoryHasher`].
 ///
 /// # Examples
 ///
 /// ```rust, no-run
-/// let path: Utf8PathBuf = get_path_for_hashing();
+/// // Straightforward hashing of a directory.
+/// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
 /// let hasher = DirectoryHasher::builder()
-///                 .directory_path(path)
+///                 .directory_path(path_to_dir_root)
 ///                 .build();
-/// let manifest = hasher.hash().unwrap();
+/// let manifest = hasher.hash().unwrap(); // <-- or handle this error
 /// ```
 #[derive(bon::Builder)]
 pub struct DirectoryHasher {
@@ -107,8 +129,10 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
-    /// Optional [`crossbeam_channel::Sender`] for sending paths of hashed
-    /// files to a user-held [`crossbeam_channel::Receiver`].
+    /// Optional [`crossbeam_channel::Sender`] for sending paths of
+    /// hashed files to a [`crossbeam_channel::Receiver`].
+    ///
+    /// The order in which file paths are sent over this channel is entirely non-deterministic.
     progress_channel: Option<Sender<Utf8PathBuf>>,
 
     /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
@@ -128,11 +152,11 @@ impl IntoIterator for DirectoryHasher {
         let (tx, rx) = crossbeam_channel::bounded(0);
         self.progress_channel = Some(tx);
         let cancel_handle = self.cancel_handle();
-        let manifest = thread::spawn(|| self.hash());
+        let manifest_handle = thread::spawn(|| self.hash());
         DirectoryHasherIter {
             rx,
             cancel_handle,
-            manifest,
+            manifest_handle,
         }
     }
 }
@@ -146,8 +170,8 @@ impl DirectoryHasher {
         cancel_handle
     }
 
-    /// Consumes `self` to hash the contents of the given directory and return
-    /// the resulting [`Manifest`], or an [`Error`] if one is encountered.
+    /// Consumes `self` to hash the contents of the given directory
+    /// and returns the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(self) -> Result<Manifest, Error> {
         let mut file_list = FileFinder::from(&self).find()?;
@@ -163,9 +187,9 @@ impl DirectoryHasher {
         self.hash_directory(entries)
     }
 
-    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by
-    /// hashing the file located at the target path. Can be terminated early if
-    /// the user has acquired a [`CancelHandle`].
+    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing the
+    /// file located at each target path.
+    /// Can be terminated early if the user has acquired a [`CancelHandle`].
     fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
         file_list
             .into_par_iter()
@@ -192,7 +216,7 @@ impl DirectoryHasher {
     }
 
     /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
-    fn hash_directory(&self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+    fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, Error> {
         let directory_name = self
             .directory_path
             .file_name()
@@ -211,7 +235,7 @@ impl DirectoryHasher {
         }
         let directory_hash = hasher.finalize();
         Ok(Manifest {
-            directory_path: Some(self.directory_path.clone()),
+            directory_path: Some(self.directory_path),
             directory_name,
             directory_hash,
             directory_size,
