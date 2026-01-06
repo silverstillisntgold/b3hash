@@ -56,7 +56,7 @@ impl Iterator for DirectoryHasherIter {
 }
 
 impl DirectoryHasherIter {
-    /// Cancels the hashing operation.
+    /// Cancels the hashing operation and closes the backing thread.
     pub fn cancel(self) {
         // Need to clone here or `into_manifest` fails with a "partially moved value" error.
         self.cancel_handle.clone().cancel();
@@ -64,13 +64,13 @@ impl DirectoryHasherIter {
         let _discard = self.into_manifest();
     }
 
-    /// Consumes the iterator and returns the resulting [`Manifest`].
+    /// Consumes the remainder of the iterator and returns the resulting [`Manifest`].
     pub fn into_manifest(self) -> Result<Manifest, Error> {
         self.into_manifest_with(|_| {})
     }
 
-    /// Consumes the iterator and returns the resulting [`Manifest`], performing
-    /// function `f` on all paths received from the iterator.
+    /// Consumes the remainder of the iterator and returns the resulting [`Manifest`],
+    /// performing function `f` on all paths received from the iterator.
     pub fn into_manifest_with<F>(mut self, f: F) -> Result<Manifest, Error>
     where
         F: Fn(Utf8PathBuf),

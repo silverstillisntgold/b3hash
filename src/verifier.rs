@@ -1,6 +1,4 @@
-use crate::hasher::DirectoryHasher;
 use crate::manifest::{Entry, Manifest};
-use crate::util::{CancelHandle, Error};
 use std::cmp::Ordering;
 
 const DEFAULT_CAP: usize = 1 << 7;
@@ -30,31 +28,24 @@ impl DiffResult {
 }
 
 #[derive(bon::Builder)]
-pub struct DirectoryVerifier<'a> {
-    hasher: DirectoryHasher,
-
-    old_manifest: &'a Manifest,
+pub struct DirectoryVerifier {
+    old_manifest: Manifest,
+    new_manifest: Manifest,
 }
 
-impl<'a> DirectoryVerifier<'a> {
-    /// Calls [`DirectoryHasher::cancel_handle`] on the internal [`DirectoryHasher`].
-    pub fn cancel_handle(&mut self) -> CancelHandle {
-        self.hasher.cancel_handle()
-    }
-
+impl DirectoryVerifier {
     #[inline(never)]
-    pub fn verify(self) -> Result<DiffResult, Error> {
+    pub fn verify(self) -> DiffResult {
         let mut result = DiffResult::new();
 
-        let new_manifest = self.hasher.hash()?;
-        if self.old_manifest.directory_size == new_manifest.directory_size
-            && self.old_manifest.directory_hash == new_manifest.directory_hash
+        if self.old_manifest.directory_size == self.new_manifest.directory_size
+            && self.old_manifest.directory_hash == self.new_manifest.directory_hash
         {
-            return Ok(result);
+            return result;
         }
 
-        let mut old_iter = self.old_manifest.entries.iter().peekable();
-        let mut new_iter = new_manifest.entries.into_iter().peekable();
+        let mut old_iter = self.old_manifest.entries.into_iter().peekable();
+        let mut new_iter = self.new_manifest.entries.into_iter().peekable();
 
         loop {
             let case = match (old_iter.peek(), new_iter.peek()) {
@@ -67,13 +58,13 @@ impl<'a> DirectoryVerifier<'a> {
                 Some(Ordering::Equal) => {
                     let old = unsafe { old_iter.next().unwrap_unchecked() };
                     let new = unsafe { new_iter.next().unwrap_unchecked() };
-                    if old != &new {
-                        result.changed.push((old.clone(), new));
+                    if old != new {
+                        result.changed.push((old, new));
                     }
                 }
                 Some(Ordering::Less) => {
                     let entry = unsafe { old_iter.next().unwrap_unchecked() };
-                    result.old_only.push(entry.clone());
+                    result.old_only.push(entry);
                 }
                 Some(Ordering::Greater) => {
                     let entry = unsafe { new_iter.next().unwrap_unchecked() };
@@ -83,6 +74,6 @@ impl<'a> DirectoryVerifier<'a> {
             }
         }
 
-        Ok(result)
+        result
     }
 }

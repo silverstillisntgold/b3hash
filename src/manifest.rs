@@ -8,15 +8,12 @@ use std::fs;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     /// Contains the original path of the directory being hashed.
+    /// Only contains `Some` when created from a directory hasher.
     #[serde(skip)]
     pub(crate) directory_path: Option<Utf8PathBuf>,
-
     pub(crate) directory_name: String,
-
     pub(crate) directory_hash: Hash,
-
     pub(crate) directory_size: u64,
-
     pub(crate) entries: Vec<Entry>,
 }
 
@@ -33,24 +30,34 @@ impl Manifest {
 
     #[inline]
     fn serialize_internal<const PRETTY: bool>(self) -> Result<bool, Error> {
-        if let Some(path) = &self.directory_path {
-            let path = path.join(HASHFILE);
-            let data = if PRETTY {
-                serde_json::to_vec_pretty(&self)
-            } else {
-                serde_json::to_vec(&self)
-            }?;
-            fs::write(path, data)?;
-            return Ok(true);
+        match &self.directory_path {
+            Some(path) => {
+                let path = path.join(HASHFILE);
+                let contents = if PRETTY {
+                    serde_json::to_vec_pretty(&self)
+                } else {
+                    serde_json::to_vec(&self)
+                }?;
+                fs::write(path, contents)?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        Ok(false)
+    }
+
+    #[inline]
+    pub fn deserialize<T>(path: T) -> Result<Manifest, Error>
+    where
+        T: AsRef<Utf8Path>,
+    {
+        Self::deserialize_internal(path.as_ref())
     }
 
     #[inline(never)]
-    pub fn deserialize(path: &Utf8Path) -> Result<Manifest, Error> {
+    fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, Error> {
         let path = path.join(HASHFILE);
-        let data = fs::read(path)?;
-        serde_json::from_slice(&data).map_err(|e| e.into())
+        let contents = fs::read(path)?;
+        serde_json::from_slice(&contents).map_err(Into::into)
     }
 
     #[inline]
@@ -74,12 +81,10 @@ impl Manifest {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Entry {
     pub(crate) path: Utf8PathBuf,
-
     pub(crate) hash: Hash,
-
     pub(crate) size: u64,
 }
 
