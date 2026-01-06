@@ -47,7 +47,7 @@ impl Manifest {
     }
 
     #[inline(never)]
-    pub fn deserialize(path: Utf8PathBuf) -> Result<Manifest, Error> {
+    pub fn deserialize(path: &Utf8Path) -> Result<Manifest, Error> {
         let path = path.join(HASHFILE);
         let data = fs::read(path)?;
         serde_json::from_slice(&data).map_err(|e| e.into())

@@ -27,7 +27,20 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 ///
 /// Because this type contains a [`JoinHandle`], dropping it mid-process causes the handle to become detached.
 /// The iterator should always be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
-/// [`Self::cancel`] can be used to cancel hashing early and safely closes the backing thread.
+/// [`Self::cancel`] can be used to cancel hashing early and safely terminate the backing thread.
+///
+/// # Examples
+///
+/// ```rust, no-run
+/// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
+/// let mut hasher_iter = DirectoryHasher::builder()
+///                         .directory_path(path_to_dir_root)
+///                         .build()
+///                         .into_iter();
+/// let manifest = hasher_iter
+///                 .into_manifest_with(|path| println!("{}", path))
+///                 .unwrap(); // <-- or handle this error
+/// ```
 pub struct DirectoryHasherIter {
     rx: crossbeam_channel::Receiver<Utf8PathBuf>,
     cancel_handle: CancelHandle,
@@ -47,7 +60,7 @@ impl DirectoryHasherIter {
     pub fn cancel(self) {
         // Need to clone here or `into_manifest` fails with a "partially moved value" error.
         self.cancel_handle.clone().cancel();
-        // Need to make sure the thread is joined, otherwise it ends up detached.
+        // Make sure the thread is joined, otherwise it ends up detached.
         let _discard = self.into_manifest();
     }
 
@@ -89,7 +102,6 @@ impl DirectoryHasherIter {
 /// # Examples
 ///
 /// ```rust, no-run
-/// // Straightforward hashing of a directory.
 /// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
 /// let hasher = DirectoryHasher::builder()
 ///                 .directory_path(path_to_dir_root)
@@ -173,9 +185,10 @@ impl DirectoryHasher {
     /// Consumes `self` to hash the contents of the given directory
     /// and returns the resulting [`Manifest`].
     #[inline(never)]
-    pub fn hash(self) -> Result<Manifest, Error> {
+    pub fn hash(mut self) -> Result<Manifest, Error> {
+        self.directory_path = self.directory_path.canonicalize_utf8()?;
         let mut file_list = FileFinder::from(&self).find()?;
-        // Stable sorting has no use here because file paths are unique.
+        // Stable sorting has no use here because file paths are inherently unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
             // to strip it out to minimize the time spent sorting.
