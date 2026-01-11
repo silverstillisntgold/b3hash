@@ -3,16 +3,24 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Error type for the crate.
+/// An error which can occur during hashing.
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum HashingError {
     #[error("file hashing canceled early")]
     Canceled,
 
     #[error(transparent)]
     Channel(#[from] crossbeam_channel::SendError<Utf8PathBuf>),
 
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+/// An error which can occur when serializing or deserializing a [`Manifest`](crate::manifest::Manifest).
+#[allow(missing_docs)]
+#[derive(Debug, thiserror::Error)]
+pub enum SerdeError {
     #[error(transparent)]
     Io(#[from] io::Error),
 

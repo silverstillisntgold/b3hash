@@ -1,6 +1,6 @@
 use crate::HASHFILE;
 use crate::hasher::DirectoryHasher;
-use crate::util::Error;
+use crate::util::HashingError;
 use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 use rayon::Scope;
@@ -26,7 +26,7 @@ macro_rules! unwrap_or_push_error_and_return {
 /// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
     directory_hasher: &'a DirectoryHasher,
-    errors: Mutex<Vec<Error>>,
+    errors: Mutex<Vec<HashingError>>,
     paths: Mutex<Vec<Utf8PathBuf>>,
 }
 
@@ -43,7 +43,7 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 impl<'a> FileFinder<'a> {
     /// Returns a list of all files within the directory specified.
     #[inline(never)]
-    pub fn find(self) -> Result<Vec<Utf8PathBuf>, Error> {
+    pub fn find(self) -> Result<Vec<Utf8PathBuf>, HashingError> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
         rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
         // If any errors were found, we only propagate the first.

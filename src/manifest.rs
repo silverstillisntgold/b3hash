@@ -1,5 +1,5 @@
 use crate::HASHFILE;
-use crate::util::Error;
+use crate::util::SerdeError;
 use blake3::Hash;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
@@ -19,25 +19,13 @@ pub struct Manifest {
 
 impl Manifest {
     #[inline(never)]
-    pub fn serialize_pretty(self) -> Result<bool, Error> {
-        self.serialize_internal::<true>()
-    }
-
-    #[inline(never)]
-    pub fn serialize(self) -> Result<bool, Error> {
-        self.serialize_internal::<false>()
-    }
-
-    #[inline]
-    fn serialize_internal<const PRETTY: bool>(self) -> Result<bool, Error> {
+    pub fn serialize(self) -> Result<bool, SerdeError> {
+        const COMPRESSION_LEVEL: i32 = 0;
         match &self.directory_path {
             Some(path) => {
                 let path = path.join(HASHFILE);
-                let contents = if PRETTY {
-                    serde_json::to_vec_pretty(&self)
-                } else {
-                    serde_json::to_vec(&self)
-                }?;
+                let source = serde_json::to_vec(&self)?;
+                let contents = zstd::encode_all(source.as_slice(), COMPRESSION_LEVEL)?;
                 fs::write(path, contents)?;
                 Ok(true)
             }
@@ -46,7 +34,7 @@ impl Manifest {
     }
 
     #[inline]
-    pub fn deserialize<T>(path: T) -> Result<Manifest, Error>
+    pub fn deserialize<T>(path: T) -> Result<Manifest, SerdeError>
     where
         T: AsRef<Utf8Path>,
     {
@@ -54,9 +42,10 @@ impl Manifest {
     }
 
     #[inline(never)]
-    fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, Error> {
+    fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, SerdeError> {
         let path = path.join(HASHFILE);
         let contents = fs::read(path)?;
+        let contents = zstd::decode_all(contents.as_slice())?;
         serde_json::from_slice(&contents).map_err(Into::into)
     }
 

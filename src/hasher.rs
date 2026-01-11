@@ -1,6 +1,6 @@
 use crate::file::FileFinder;
 use crate::manifest::{Entry, Manifest};
-use crate::util::{CancelHandle, Error};
+use crate::util::{CancelHandle, HashingError};
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::Sender;
@@ -20,7 +20,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
     .into()
 }
 
-/// Iterator over all files hashed by the constructing [`DirectoryHasher`].
+/// Iterator over the paths of all files hashed by the source [`DirectoryHasher`].
 ///
 /// File paths are relative to their root directory, and the order in which they
 /// are received is non-deterministic.
@@ -28,27 +28,29 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 /// # Warning
 ///
 /// Because this type contains a [`JoinHandle`], dropping it mid-process causes the handle to become detached.
-/// The iterator should always be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
+/// The iterator should generally be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
 ///
 /// If you are using standard [`Iterator`] functions to consume the iterator, you **must** call
 /// [`Self::cancel`] or [`Self::into_manifest`] after the iterator is exhausted.
 ///
 /// # Examples
 ///
-/// ```rust, no-run
+/// ```rust, no_run
 /// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
 /// let mut hasher_iter = DirectoryHasher::builder()
 ///                         .directory_path(path_to_dir_root)
 ///                         .build()
 ///                         .into_iter();
 /// let manifest = hasher_iter
-///                 .into_manifest_with(|path| println!("{}", path))
+///                 .into_manifest_with(|path: Utf8PathBuf| {
+///                     // Do something with the path.
+///                 })
 ///                 .unwrap(); // <-- or handle this error
 /// ```
 pub struct DirectoryHasherIter {
     rx: crossbeam_channel::Receiver<Utf8PathBuf>,
     cancel_handle: CancelHandle,
-    manifest_handle: JoinHandle<Result<Manifest, Error>>,
+    manifest_handle: JoinHandle<Result<Manifest, HashingError>>,
 }
 
 impl Iterator for DirectoryHasherIter {
@@ -68,13 +70,13 @@ impl DirectoryHasherIter {
     }
 
     /// Consumes the remainder of the iterator and returns the resulting [`Manifest`].
-    pub fn into_manifest(self) -> Result<Manifest, Error> {
+    pub fn into_manifest(self) -> Result<Manifest, HashingError> {
         self.into_manifest_with(|_| {})
     }
 
     /// Consumes the remainder of the iterator and returns the resulting [`Manifest`],
     /// performing function `f` on all paths received from the iterator.
-    pub fn into_manifest_with<F>(mut self, f: F) -> Result<Manifest, Error>
+    pub fn into_manifest_with<F>(mut self, f: F) -> Result<Manifest, HashingError>
     where
         F: Fn(Utf8PathBuf),
     {
@@ -99,7 +101,7 @@ impl DirectoryHasherIter {
 ///
 /// # Examples
 ///
-/// ```rust, no-run
+/// ```rust, no_run
 /// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
 /// let hasher = DirectoryHasher::builder()
 ///                 .directory_path(path_to_dir_root)
@@ -176,7 +178,7 @@ impl DirectoryHasher {
     /// Consumes `self` to hash the contents of the given directory
     /// and returns the resulting [`Manifest`].
     #[inline(never)]
-    pub fn hash(mut self) -> Result<Manifest, Error> {
+    pub fn hash(mut self) -> Result<Manifest, HashingError> {
         self.directory_path = self.directory_path.canonicalize_utf8()?;
         let mut file_list = FileFinder::from(&self).find()?;
         // Stable sorting has no use here because file paths are inherently unique.
@@ -194,14 +196,14 @@ impl DirectoryHasher {
     /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing the
     /// file located at each target path.
     /// Can be terminated early if the user has acquired a [`CancelHandle`].
-    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, Error> {
+    fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, HashingError> {
         file_list
             .into_par_iter()
             .map(|file_path| {
                 if let Some(cancel_handle) = &self.cancel_handle
                     && cancel_handle.load()
                 {
-                    return Err(Error::Canceled);
+                    return Err(HashingError::Canceled);
                 }
                 let mut hasher = Hasher::new();
                 let reader = fs::File::open(file_path.as_std_path())?;
@@ -220,7 +222,7 @@ impl DirectoryHasher {
     }
 
     /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
-    fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, Error> {
+    fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, HashingError> {
         let directory_name = self
             .directory_path
             .file_name()
