@@ -1,9 +1,11 @@
-use crate::file::FileFinder;
-use crate::manifest::{Entry, Manifest};
-use crate::util::{CancelHandle, HashingError};
+use crate::{
+    file::FileFinder,
+    manifest::{Entry, Manifest},
+    util::{CancelHandle, HashingError},
+};
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use rayon::prelude::*;
 use std::thread::JoinHandle;
 use std::{fs, thread};
@@ -22,8 +24,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 
 /// Iterator over the paths of all files hashed by the source [`DirectoryHasher`].
 ///
-/// File paths are relative to their root directory, and the order in which they
-/// are received is non-deterministic.
+/// File paths are relative to the root directory, and the order in which they are received is non-deterministic.
 ///
 /// # Warning
 ///
@@ -36,19 +37,22 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 /// # Examples
 ///
 /// ```rust, no_run
+/// use camino::Utf8PathBuf;
+/// use b3hash::{DirectoryHasher, DirectoryHasherIter, Manifest};
+///
 /// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
-/// let mut hasher_iter = DirectoryHasher::builder()
-///                         .directory_path(path_to_dir_root)
-///                         .build()
-///                         .into_iter();
-/// let manifest = hasher_iter
-///                 .into_manifest_with(|path: Utf8PathBuf| {
-///                     // Do something with the path.
-///                 })
-///                 .unwrap(); // <-- or handle this error
+/// let mut hasher_iter: DirectoryHasherIter = DirectoryHasher::builder()
+///     .directory_path(path_to_dir_root)
+///     .build()
+///     .into_iter();
+/// let manifest: Manifest = hasher_iter
+///     .into_manifest_with(|file_path: Utf8PathBuf| {
+///         // Do something with `file_path`.
+///     })
+///     .unwrap(); // <-- Probably want to handle this error.
 /// ```
 pub struct DirectoryHasherIter {
-    rx: crossbeam_channel::Receiver<Utf8PathBuf>,
+    rx: Receiver<Utf8PathBuf>,
     cancel_handle: CancelHandle,
     manifest_handle: JoinHandle<Result<Manifest, HashingError>>,
 }
@@ -66,7 +70,7 @@ impl DirectoryHasherIter {
     pub fn cancel(self) {
         self.cancel_handle.cancel();
         // Make sure the thread is joined, otherwise it ends up detached.
-        let _discard = self.into_manifest();
+        _ = self.into_manifest();
     }
 
     /// Consumes the remainder of the iterator and returns the resulting [`Manifest`].
@@ -96,17 +100,20 @@ impl DirectoryHasherIter {
 /// modified with [`DirectoryHasherBuilder::respect_hidden`].
 ///
 /// If you would like to monitor which files are being hashed, the [`IntoIterator`]
-/// implementation provides a [`DirectoryHasherIter`] and makes it easy to process the
+/// implementation provides a [`DirectoryHasherIter`], which makes it easy to process the
 /// resulting file paths as files are hashed.
 ///
 /// # Examples
 ///
 /// ```rust, no_run
+/// use camino::Utf8PathBuf;
+/// use b3hash::{DirectoryHasher, Manifest};
+///
 /// let path_to_dir_root: Utf8PathBuf = get_path_for_hashing();
-/// let hasher = DirectoryHasher::builder()
-///                 .directory_path(path_to_dir_root)
-///                 .build();
-/// let manifest = hasher.hash().unwrap(); // <-- or handle this error
+/// let hasher: DirectoryHasher = DirectoryHasher::builder()
+///     .directory_path(path_to_dir_root)
+///     .build();
+/// let manifest: Manifest = hasher.hash().unwrap(); // <-- Probably want to handle this error.
 /// ```
 #[derive(bon::Builder)]
 pub struct DirectoryHasher {
@@ -141,14 +148,13 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
-    /// Optional [`crossbeam_channel::Sender`] for sending paths of
-    /// hashed files to a [`crossbeam_channel::Receiver`].
+    /// Optional [`Sender`] for sending paths of hashed files to a [`Receiver`].
     ///
     /// The order in which file paths are sent over this channel is non-deterministic.
     #[builder(skip)]
     progress_channel: Option<Sender<Utf8PathBuf>>,
 
-    /// Optional [`CancelHandle`] for cancelling hashing operation early from outside.
+    /// Optional [`CancelHandle`] for canceling hashing operation early from outside.
     ///
     /// Must be created using [`Self::cancel_handle`].
     #[builder(skip)]
@@ -166,7 +172,7 @@ impl IntoIterator for DirectoryHasher {
         self.progress_channel = Some(tx);
         let cancel_handle = self.cancel_handle();
         let manifest_handle = thread::spawn(|| self.hash());
-        DirectoryHasherIter {
+        Self::IntoIter {
             rx,
             cancel_handle,
             manifest_handle,
@@ -175,8 +181,7 @@ impl IntoIterator for DirectoryHasher {
 }
 
 impl DirectoryHasher {
-    /// Consumes `self` to hash the contents of the given directory
-    /// and returns the resulting [`Manifest`].
+    /// Consumes `self` to hash the contents of the given directory and returns the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
         self.directory_path = self.directory_path.canonicalize_utf8()?;
@@ -184,7 +189,7 @@ impl DirectoryHasher {
         // Stable sorting has no use here because file paths are inherently unique.
         file_list.sort_unstable_by(|a, b| {
             // We don't know how long the root directory prefix will be, so it's best
-            // to strip it out to minimize the time spent sorting.
+            // to strip it out to minimize the time spent comparing elements.
             let a_stripped = self.strip_prefix(a.as_path());
             let b_stripped = self.strip_prefix(b.as_path());
             a_stripped.cmp(b_stripped)
@@ -259,7 +264,7 @@ impl DirectoryHasher {
         unsafe { path.as_str().get_unchecked(self.prefix_len..) }
     }
 
-    /// Attaches a [`CancelHandle`] to `self` for mid-process cancellation.
+    /// Attaches a [`CancelHandle`] to `self` for mid-process cancelation.
     fn cancel_handle(&mut self) -> CancelHandle {
         let cancel_handle = CancelHandle::default();
         self.cancel_handle = Some(cancel_handle.clone());

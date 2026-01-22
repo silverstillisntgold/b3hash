@@ -1,9 +1,13 @@
 use camino::Utf8PathBuf;
-use std::io;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
-/// An error which can occur during hashing.
+/// An error which can occur when hashing a directory.
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum HashingError {
@@ -17,7 +21,7 @@ pub enum HashingError {
     Io(#[from] io::Error),
 }
 
-/// An error which can occur when serializing or deserializing a [`Manifest`](crate::manifest::Manifest).
+/// An error which can occur when serializing or deserializing [`Manifest`](crate::manifest::Manifest).
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {

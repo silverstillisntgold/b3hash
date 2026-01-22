@@ -1,5 +1,4 @@
-use crate::HASHFILE;
-use crate::util::SerdeError;
+use crate::{HASHFILE, util::SerdeError};
 use blake3::Hash;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
@@ -20,6 +19,7 @@ pub struct Manifest {
 impl Manifest {
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
+        /// Use zstd's default compression level.
         const COMPRESSION_LEVEL: i32 = 0;
         match &self.directory_path {
             Some(path) => {

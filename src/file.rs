@@ -1,6 +1,4 @@
-use crate::HASHFILE;
-use crate::hasher::DirectoryHasher;
-use crate::util::HashingError;
+use crate::{HASHFILE, hasher::DirectoryHasher, util::HashingError};
 use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 use rayon::Scope;
