@@ -41,29 +41,28 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
     let mut new_iter = new_manifest.entries.into_iter().peekable();
 
     loop {
-        let case = match (old_iter.peek(), new_iter.peek()) {
-            (Some(old), Some(new)) => Some(old.path.cmp(&new.path)),
-            (Some(_), None) => Some(Ordering::Less),
-            (None, Some(_)) => Some(Ordering::Greater),
-            (None, None) => None,
+        let ord = match (old_iter.peek(), new_iter.peek()) {
+            (Some(old), Some(new)) => old.path.cmp(&new.path),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => break,
         };
-        match case {
-            Some(Ordering::Equal) => {
-                let old = unsafe { old_iter.next().unwrap_unchecked() };
-                let new = unsafe { new_iter.next().unwrap_unchecked() };
+        match ord {
+            Ordering::Equal => {
+                let old = old_iter.next().unwrap();
+                let new = new_iter.next().unwrap();
                 if old != new {
                     result.changed.push((old, new));
                 }
             }
-            Some(Ordering::Less) => {
-                let entry = unsafe { old_iter.next().unwrap_unchecked() };
+            Ordering::Less => {
+                let entry = old_iter.next().unwrap();
                 result.old_only.push(entry);
             }
-            Some(Ordering::Greater) => {
-                let entry = unsafe { new_iter.next().unwrap_unchecked() };
+            Ordering::Greater => {
+                let entry = new_iter.next().unwrap();
                 result.new_only.push(entry);
             }
-            None => break,
         }
     }
 
