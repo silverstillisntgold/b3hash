@@ -29,25 +29,18 @@ impl DiffResult {
 
 #[inline(never)]
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
-    let mut result = DiffResult::new();
-
     if old_manifest.directory_size == new_manifest.directory_size
         && old_manifest.directory_hash == new_manifest.directory_hash
     {
         return None;
     }
 
+    let mut result = DiffResult::new();
     let mut old_iter = old_manifest.entries.into_iter().peekable();
     let mut new_iter = new_manifest.entries.into_iter().peekable();
 
-    loop {
-        let ord = match (old_iter.peek(), new_iter.peek()) {
-            (Some(old), Some(new)) => old.path.cmp(&new.path),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => break,
-        };
-        match ord {
+    while let (Some(old), Some(new)) = (old_iter.peek(), new_iter.peek()) {
+        match old.path().cmp(new.path()) {
             Ordering::Equal => {
                 let old = old_iter.next().unwrap();
                 let new = new_iter.next().unwrap();
@@ -55,16 +48,12 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
                     result.changed.push((old, new));
                 }
             }
-            Ordering::Less => {
-                let entry = old_iter.next().unwrap();
-                result.old_only.push(entry);
-            }
-            Ordering::Greater => {
-                let entry = new_iter.next().unwrap();
-                result.new_only.push(entry);
-            }
+            Ordering::Less => result.old_only.push(old_iter.next().unwrap()),
+            Ordering::Greater => result.new_only.push(new_iter.next().unwrap()),
         }
     }
+    result.old_only.extend(old_iter);
+    result.new_only.extend(new_iter);
 
     match result.is_identical() {
         true => None,
