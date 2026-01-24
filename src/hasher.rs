@@ -1,13 +1,17 @@
 use crate::{
+    HashingError,
     file::FileFinder,
     manifest::{Entry, Manifest},
-    util::{CancelHandle, HashingError},
 };
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::{Receiver, Sender};
 use rayon::prelude::*;
 use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::JoinHandle,
     {fs, thread},
 };
@@ -55,7 +59,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 /// ```
 pub struct DirectoryHasherIter {
     rx: Receiver<Utf8PathBuf>,
-    cancel_handle: CancelHandle,
+    cancel_handle: Arc<AtomicBool>,
     manifest_handle: JoinHandle<Result<Manifest, HashingError>>,
 }
 
@@ -70,7 +74,7 @@ impl Iterator for DirectoryHasherIter {
 impl DirectoryHasherIter {
     /// Cancels file hashing (if any files remain) and closes the backing thread.
     pub fn cancel(self) {
-        self.cancel_handle.cancel();
+        self.cancel_handle.store(true, Ordering::Relaxed);
         // Make sure the thread is joined, otherwise it ends up detached.
         _ = self.into_manifest();
     }
@@ -156,11 +160,11 @@ pub struct DirectoryHasher {
     #[builder(skip)]
     progress_channel: Option<Sender<Utf8PathBuf>>,
 
-    /// Optional [`CancelHandle`] for canceling hashing operation early from outside.
+    /// Optional cancel handle for canceling hashing operation early from outside.
     ///
     /// Must be created using [`Self::cancel_handle`].
     #[builder(skip)]
-    cancel_handle: Option<CancelHandle>,
+    cancel_handle: Option<Arc<AtomicBool>>,
 }
 
 impl IntoIterator for DirectoryHasher {
@@ -202,13 +206,13 @@ impl DirectoryHasher {
 
     /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing the
     /// file located at each target path.
-    /// Can be terminated early if the user has acquired a [`CancelHandle`].
+    /// Can be terminated early if the user has acquired a cancel handle.
     fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, HashingError> {
         file_list
             .into_par_iter()
             .map(|file_path| {
                 if let Some(cancel_handle) = &self.cancel_handle
-                    && cancel_handle.load()
+                    && cancel_handle.load(Ordering::Relaxed)
                 {
                     return Err(HashingError::Canceled);
                 }
@@ -266,9 +270,9 @@ impl DirectoryHasher {
         unsafe { path.as_str().get_unchecked(self.prefix_len..) }
     }
 
-    /// Attaches a [`CancelHandle`] to `self` for mid-process cancelation.
-    fn cancel_handle(&mut self) -> CancelHandle {
-        let cancel_handle = CancelHandle::default();
+    /// Attaches a cancel handle to `self` for mid-process cancelation.
+    fn cancel_handle(&mut self) -> Arc<AtomicBool> {
+        let cancel_handle = Arc::new(AtomicBool::new(false));
         self.cancel_handle = Some(cancel_handle.clone());
         cancel_handle
     }

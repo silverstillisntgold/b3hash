@@ -1,4 +1,4 @@
-use crate::{HASHFILE, util::SerdeError};
+use crate::{HASHFILE, SerdeError};
 use blake3::Hash;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
