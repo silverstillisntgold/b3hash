@@ -7,8 +7,10 @@ use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::{Receiver, Sender};
 use rayon::prelude::*;
-use std::thread::JoinHandle;
-use std::{fs, thread};
+use std::{
+    thread::JoinHandle,
+    {fs, thread},
+};
 
 /// Windows always has to be so funny and unique >:(
 #[inline]
@@ -19,7 +21,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
     } else {
         s.to_string()
     }
-    .into()
+    .into() // This conversion is free.
 }
 
 /// Iterator over the paths of all files hashed by the source [`DirectoryHasher`].
