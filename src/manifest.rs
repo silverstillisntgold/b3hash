@@ -70,7 +70,7 @@ impl Manifest {
     }
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Entry {
     pub(crate) path: Utf8PathBuf,
     pub(crate) hash: Hash,
