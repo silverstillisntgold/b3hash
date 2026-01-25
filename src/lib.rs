@@ -4,7 +4,7 @@
 A crate for creating and validating directory hashfiles.
 */
 
-//#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 mod file;
 mod hasher;
@@ -29,7 +29,7 @@ pub enum HashingError {
     Io(#[from] std::io::Error),
 }
 
-/// An error which can occur when serializing or deserializing [`Manifest`].
+/// An error which can occur when serializing or deserializing a [`Manifest`].
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {

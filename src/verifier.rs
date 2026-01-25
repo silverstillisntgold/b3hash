@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 
 const DEFAULT_CAP: usize = 1 << 7;
 
+/// Contains the differences between the old and new [`Manifest`]'s which were used to call [`verify`].
 #[derive(Debug)]
 pub struct DiffResult {
     old_only: Vec<Entry>,
@@ -10,11 +11,37 @@ pub struct DiffResult {
     changed: Vec<(Entry, Entry)>,
 }
 
+impl DiffResult {
+    /// Returns entries which only existed in the old [`Manifest`].
+    #[inline]
+    pub fn old_only(&self) -> &[Entry] {
+        &self.old_only
+    }
+
+    /// Returns entries which only existed in the new [`Manifest`]
+    #[inline]
+    pub fn new_only(&self) -> &[Entry] {
+        &self.new_only
+    }
+
+    /// Returns entries which exist in both [`Manifest`]'s, but are different.
+    #[inline]
+    pub fn changed(&self) -> &[(Entry, Entry)] {
+        &self.changed
+    }
+}
+
+/// Compares the contents of two distinct [`Manifest`]'s, returning `None` if they are the same.
+///
+/// If any difference is found, a [`DiffResult`] is returned which contains information about
+/// how the two directories differ.
+///
+/// The only difference which is allowed is the name of root directory.
 #[inline(never)]
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
-    // It's fine if the name of the root directory is different.
+    // It's fine if the name of the root directories are different.
     if old_manifest.directory_size == new_manifest.directory_size
-        && old_manifest.directory_hash == new_manifest.directory_hash
+        && old_manifest.directory_hash.as_bytes() == new_manifest.directory_hash.as_bytes()
     {
         return None;
     }
@@ -32,8 +59,8 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
             Ordering::Equal => {
                 let old = old_iter.next().unwrap();
                 let new = new_iter.next().unwrap();
-                // We've already compared the path and found it to be equal.
-                if old.size != new.size || old.hash != new.hash {
+                // We're in this branch because we've already found the paths to be equal.
+                if old.size != new.size || old.hash.as_bytes() != new.hash.as_bytes() {
                     result.changed.push((old, new));
                 }
             }
