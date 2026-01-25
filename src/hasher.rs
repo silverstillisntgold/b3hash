@@ -8,12 +8,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_channel::{Receiver, Sender};
 use rayon::prelude::*;
 use std::{
+    fs,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    thread::JoinHandle,
-    {fs, thread},
+    thread::{self, JoinHandle},
 };
 
 /// Windows always has to be so funny and unique >:(
@@ -76,7 +76,7 @@ impl DirectoryHasherIter {
     pub fn cancel(self) {
         self.cancel_handle.store(true, Ordering::Relaxed);
         // Make sure the thread is joined, otherwise it ends up detached.
-        _ = self.into_manifest();
+        let _ = self.into_manifest();
     }
 
     /// Consumes the remainder of the iterator and returns the resulting [`Manifest`].
@@ -225,7 +225,9 @@ impl DirectoryHasher {
                 // hashed represents the size of the file hashed.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
-                    tx.send(file_path)?;
+                    // If this would propagate an error, we've already canceled hashing and
+                    // returned the appropriate error, so we can ignore this one.
+                    let _ = tx.send(file_path);
                 }
                 Ok(Entry { path, hash, size })
             })

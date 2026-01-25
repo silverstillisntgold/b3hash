@@ -26,13 +26,10 @@ pub enum HashingError {
     Canceled,
 
     #[error(transparent)]
-    Channel(#[from] crossbeam_channel::SendError<camino::Utf8PathBuf>),
-
-    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
-/// An error which can occur when serializing or deserializing [`Manifest`](crate::manifest::Manifest).
+/// An error which can occur when serializing or deserializing [`Manifest`].
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {
