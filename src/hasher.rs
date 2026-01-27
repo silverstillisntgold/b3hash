@@ -204,8 +204,8 @@ impl DirectoryHasher {
         self.hash_directory(entries)
     }
 
-    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing the
-    /// file located at each target path.
+    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing
+    /// the file located at each target path.
     /// Can be terminated early if the user has acquired a cancel handle.
     fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, HashingError> {
         file_list
@@ -235,6 +235,11 @@ impl DirectoryHasher {
     }
 
     /// Processes `entries` into a [`Manifest`] by hashing all fields of each [`Entry`] in order.
+    ///
+    /// # Warning
+    ///
+    /// It is expected that `entries` is sorted by file path, so that the ordering is consistent,
+    /// otherwise the directory hash in the returned [`Manifest`] will be different each time.
     fn hash_directory(self, entries: Vec<Entry>) -> Result<Manifest, HashingError> {
         let directory_name = self
             .directory_path
@@ -244,6 +249,8 @@ impl DirectoryHasher {
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
         // There are faster ways to do this, but this simple and non-allocating approach is preferred.
+        // We want to hash all contents of each entry, so **any** small change to
+        // an entry is reflected in the final directory hash.
         for entry in &entries {
             // WARNING: Changing the order in which these fields are fed to
             // the hasher will change the final value of `directory_hash`.
@@ -262,7 +269,8 @@ impl DirectoryHasher {
         })
     }
 
-    /// Strips the root directory prefix (including it's trailing slash) from `path`.
+    /// Strips the root directory prefix (including it's trailing slash) from `path`,
+    /// returning the child path relative to the root directory.
     #[inline]
     fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
         // SAFETY: Since all files are descendants of `self.directory_path`,

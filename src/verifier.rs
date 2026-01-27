@@ -31,12 +31,13 @@ impl DiffResult {
     }
 }
 
-/// Compares the contents of two distinct [`Manifest`]'s, returning `None` if they are the same.
+/// Compares the contents of two [`Manifest`]'s, returning `None` if they are the same.
 ///
 /// If any difference is found, a [`DiffResult`] is returned which contains information about
 /// how the two directories differ.
 ///
-/// The only difference which is allowed is the name of root directory.
+/// The only difference which is allowed is the name of root directory, because the name of
+/// a directory does not impact it's internal structure or the information it contains.
 #[inline(never)]
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
     // It's fine if the name of the root directories are different.
@@ -68,6 +69,8 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
             Ordering::Greater => result.new_only.push(new_iter.next().unwrap()),
         }
     }
+    // At most only one of these will actually append any data,
+    // but we just delegate determining which to the Vec api.
     result.old_only.extend(old_iter);
     result.new_only.extend(new_iter);
 

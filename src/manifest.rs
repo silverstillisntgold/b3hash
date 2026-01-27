@@ -4,13 +4,15 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-/// The result of consuming a [`DirectoryHasher`](crate::hasher::DirectoryHasher).
+/// The result of hashing a [`DirectoryHasher`](crate::hasher::DirectoryHasher)
+/// or consuming the entirety of a [DirectoryHasherIter](crate::hasher::DirectoryHasherIter).
 ///
 /// Can be serialized into a b3hash file with [`Self::serialize`], or used to verify against
 /// another [`Manifest`] using [`verify`](crate::verifier::verify).
 ///
 /// If a `Manifest` instance is the result of calling [`Self::deserialize`], then it is
-/// not possible to reserialize it.
+/// not possible to reserialize it. That is to say that [`Manifest`]'s can only be serialized
+/// when they come directly from `DirectoryHasher` or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     /// Contains the original path of the directory being hashed.
@@ -29,9 +31,9 @@ impl Manifest {
     /// If `self` was derived from any source other than a [`DirectoryHasher`](crate::hasher::DirectoryHasher),
     /// this will always return `Ok(false)`.
     #[inline(never)]
-    pub fn serialize(self) -> Result<bool, SerdeError> {
+    pub fn serialize(&mut self) -> Result<bool, SerdeError> {
         const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
-        match &self.directory_path {
+        match self.directory_path.take() {
             Some(path) => {
                 let path = path.join(HASHFILE);
                 let source = serde_json::to_vec(&self)?;
