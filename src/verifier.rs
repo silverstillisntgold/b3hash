@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 
 const DEFAULT_CAP: usize = 1 << 7;
 
-/// Contains the differences between the old and new [`Manifest`]'s which were used to call [`verify`].
+/// Contains the differences between the two [`Manifest`]'s which were used to call [`verify`].
 #[derive(Debug)]
 pub struct DiffResult {
     old_only: Vec<Entry>,
@@ -36,7 +36,7 @@ impl DiffResult {
 /// If any difference is found, a [`DiffResult`] is returned which contains information about
 /// how the two directories differ.
 ///
-/// The only difference which is allowed is the name of root directory, because the name of
+/// The only difference which is allowed is the name of the root directory, because the name of
 /// a directory does not impact it's internal structure or the information it contains.
 #[inline(never)]
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
@@ -69,8 +69,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
             Ordering::Greater => result.new_only.push(new_iter.next().unwrap()),
         }
     }
-    // At most only one of these will actually append any data,
-    // but we just delegate determining which to the Vec api.
+    // At most only one of these will actually append any data.
     result.old_only.extend(old_iter);
     result.new_only.extend(new_iter);
 
