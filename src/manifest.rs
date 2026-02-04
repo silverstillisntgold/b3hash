@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 
 /// The result of hashing a [`DirectoryHasher`](crate::hasher::DirectoryHasher)
-/// or consuming the entirety of a [DirectoryHasherIter](crate::hasher::DirectoryHasherIter).
+/// or consuming the entirety of a [`DirectoryHasherIter`](crate::hasher::DirectoryHasherIter).
 ///
 /// Can be serialized into a b3hash file with [`Self::serialize`], or used to verify against
 /// another [`Manifest`] using [`verify`](crate::verifier::verify).
@@ -31,9 +31,9 @@ impl Manifest {
     /// If `self` was derived from any source other than a [`DirectoryHasher`](crate::hasher::DirectoryHasher),
     /// this will always return `Ok(false)`.
     #[inline(never)]
-    pub fn serialize(&mut self) -> Result<bool, SerdeError> {
+    pub fn serialize(self) -> Result<bool, SerdeError> {
         const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
-        match self.directory_path.take() {
+        match &self.directory_path {
             Some(path) => {
                 let path = path.join(HASHFILE);
                 let source = serde_json::to_vec(&self)?;
@@ -94,6 +94,8 @@ impl Manifest {
     }
 
     /// Returns a slice containing all [`Entry`]'s which make up this [`Manifest`].
+    ///
+    /// This slice is always sorted by the `path` field of each entry.
     #[inline]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
