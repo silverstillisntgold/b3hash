@@ -99,7 +99,7 @@ impl DirectoryHasherIter {
     }
 }
 
-/// Struct for hashing directory trees, should be constructed with [`Self::builder`].
+/// Struct for hashing directory trees, which should only ever be constructed with [`Self::builder`].
 ///
 /// The only required field is `directory_path`, which specifies the directory whose contents
 /// should be hashed. By default, hidden files and directories will be ignored, but this can be
@@ -123,7 +123,7 @@ impl DirectoryHasherIter {
 /// ```
 #[derive(bon::Builder)]
 pub struct DirectoryHasher {
-    /// Path of the directory which will be hashed.
+    /// Path to the directory that will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
 
     /// Contains the length of `directory_path` when it is the leading
@@ -174,7 +174,8 @@ impl IntoIterator for DirectoryHasher {
     fn into_iter(mut self) -> Self::IntoIter {
         // Using a bounded, 0-length channel so the backing computation
         // thread only progresses when calling `next` on the iterator.
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        const CHANNEL_CAP: usize = 0;
+        let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
         self.progress_channel = Some(tx);
         let cancel_handle = self.cancel_handle();
         let manifest_handle = thread::spawn(|| self.hash());
@@ -190,6 +191,7 @@ impl DirectoryHasher {
     /// Consumes `self` to hash the contents of the given directory and returns the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
+        // Canonicalize here so we always have the correct name of the directory being hashed.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
         let mut file_list = FileFinder::from(&self).find()?;
         // Stable sorting has no use here because file paths are inherently unique.
@@ -221,8 +223,8 @@ impl DirectoryHasher {
                 hasher.update_reader(reader)?;
                 let path = fuck_windows(self.strip_prefix(file_path.as_path()));
                 let hash = hasher.finalize();
-                // Because we've only hashed a single file, the amount of bytes
-                // hashed represents the size of the file hashed.
+                // Because we've only hashed a single file, the amount of
+                // bytes hashed represents the size of the file hashed.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
                     // If this would propagate an error, we've already canceled hashing and
@@ -273,7 +275,7 @@ impl DirectoryHasher {
     /// returning the child path relative to the root directory.
     #[inline]
     fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
-        // SAFETY: Since all files are descendants of `self.directory_path`,
+        // SAFETY: Because all files are descendants of `self.directory_path`,
         // they all must have it as a prefix. And because `self.prefix_len`
         // holds the index which is the start of the relative path, this will
         // always return the entire relative path without the root directory.
