@@ -4,6 +4,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
+
 /// The result of hashing a [`DirectoryHasher`](crate::hasher::DirectoryHasher)
 /// or consuming the entirety of a [`DirectoryHasherIter`](crate::hasher::DirectoryHasherIter).
 ///
@@ -32,7 +34,6 @@ impl Manifest {
     /// this will always return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
-        const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
         match &self.directory_path {
             Some(path) => {
                 let path = path.join(HASHFILE);

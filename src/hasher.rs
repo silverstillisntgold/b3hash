@@ -128,26 +128,7 @@ pub struct DirectoryHasher {
 
     /// Contains the length of `directory_path` when it is the leading
     /// component of a file or directory beneath it.
-    ///
-    /// This ensures that we never include a leading `/` or `\` when stripping paths.
-    ///
-    /// # Examples
-    ///
-    /// ```text
-    /// path/  --> len == 5
-    /// 012345 --> we want to start at 5 to avoid the slash
-    ///
-    /// path   --> len == 4
-    /// 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
-    /// ```
-    #[builder(skip = {
-        let s = directory_path.as_str();
-        if s.ends_with('/') || s.ends_with('\\') {
-            s.len()
-        } else {
-            s.len() + 1
-        }
-    })]
+    #[builder(skip)]
     prefix_len: usize,
 
     /// Should files and directories beginning with `.` be skipped?
@@ -193,6 +174,22 @@ impl DirectoryHasher {
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
         // Canonicalize here so we always have the correct name of the directory being hashed.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
+        // This ensures that we never include a leading `/` or `\` when stripping paths.
+        // Need to do this here since we've just altered `self.directory_path`.
+        //
+        // path/  --> len == 5
+        // 012345 --> we want to start at 5 to avoid the slash
+        //
+        // path   --> len == 4
+        // 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
+        self.prefix_len = {
+            let s = self.directory_path.as_str();
+            if s.ends_with('/') || s.ends_with('\\') {
+                s.len()
+            } else {
+                s.len() + 1
+            }
+        };
         let mut file_list = FileFinder::from(&self).find()?;
         // Stable sorting has no use here because file paths are inherently unique.
         file_list.sort_unstable_by(|a, b| {
