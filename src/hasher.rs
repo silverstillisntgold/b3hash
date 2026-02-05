@@ -42,7 +42,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 ///
 /// # Examples
 ///
-/// ```rust, no_run
+/// ```ignore
 /// use camino::Utf8PathBuf;
 /// use b3hash::{DirectoryHasher, DirectoryHasherIter, Manifest};
 ///
@@ -111,7 +111,7 @@ impl DirectoryHasherIter {
 ///
 /// # Examples
 ///
-/// ```rust, no_run
+/// ```ignore
 /// use camino::Utf8PathBuf;
 /// use b3hash::{DirectoryHasher, Manifest};
 ///

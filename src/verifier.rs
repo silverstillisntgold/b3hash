@@ -18,7 +18,7 @@ impl DiffResult {
         &self.old_only
     }
 
-    /// Returns entries which only existed in the new [`Manifest`]
+    /// Returns entries which only existed in the new [`Manifest`].
     #[inline]
     pub fn new_only(&self) -> &[Entry] {
         &self.new_only
