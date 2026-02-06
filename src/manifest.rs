@@ -14,7 +14,7 @@ const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 ///
 /// If a `Manifest` instance is the result of calling [`Self::deserialize`], then it is
 /// not possible to reserialize it. That is to say that [`Manifest`]'s can only be serialized
-/// when they come directly from `DirectoryHasher` or it's iterator.
+/// when they come directly from a `DirectoryHasher` or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     /// Contains the original path of the directory being hashed.
@@ -30,8 +30,8 @@ pub struct Manifest {
 impl Manifest {
     /// Attempts to serialize `self` into a new b3hash file, returning `Ok(true)` on success.
     ///
-    /// If `self` was derived from any source other than a [`DirectoryHasher`](crate::hasher::DirectoryHasher),
-    /// this will always return `Ok(false)`.
+    /// If `self` was derived from any source other than an original [`DirectoryHasher`](crate::hasher::DirectoryHasher)
+    /// or it's iterator, this will always return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
         match &self.directory_path {
@@ -66,8 +66,8 @@ impl Manifest {
     fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, SerdeError> {
         let path = path.join(HASHFILE);
         let contents = fs::read(path)?;
-        let contents = zstd::decode_all(contents.as_slice())?;
-        serde_json::from_slice(&contents).map_err(Into::into)
+        let source = zstd::decode_all(contents.as_slice())?;
+        serde_json::from_slice(&source).map_err(Into::into)
     }
 
     /// Returns the name of the directory.
