@@ -12,7 +12,7 @@ const HIDDEN_ENTRY_PREFIX: char = '.';
 macro_rules! unwrap_or_push_error_and_return {
     ($fallible_expr: expr, $errors: expr) => {
         match ($fallible_expr) {
-            Ok(value) => value,
+            Ok(v) => v,
             Err(e) => {
                 ($errors).lock().push(e.into());
                 return;
@@ -83,12 +83,12 @@ impl<'a> FileFinder<'a> {
     fn should_skip(&self, file_name: &str) -> bool {
         const {
             assert!(
-                HASHFILE.as_bytes()[0] == HIDDEN_ENTRY_PREFIX as u8,
+                *HASHFILE.as_bytes().first().unwrap() == HIDDEN_ENTRY_PREFIX as u8,
                 "we're operating on the assumption that `HASHFILE` is hidden"
             );
         }
         if self.directory_hasher.respect_hidden {
-            // The hashfile is hidden, so we don't need to explicitly
+            // The hashfile itself is hidden, so we don't need to explicitly
             // check for it when respecting hidden entries.
             file_name.starts_with(HIDDEN_ENTRY_PREFIX)
         } else {
