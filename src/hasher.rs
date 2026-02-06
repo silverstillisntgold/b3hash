@@ -58,9 +58,9 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 ///     .unwrap(); // <-- Probably want to handle this error.
 /// ```
 pub struct DirectoryHasherIter {
-    rx: Receiver<Utf8PathBuf>,
     cancel_handle: Arc<AtomicBool>,
     manifest_handle: JoinHandle<Result<Manifest, HashingError>>,
+    rx: Receiver<Utf8PathBuf>,
 }
 
 impl Iterator for DirectoryHasherIter {
@@ -161,9 +161,9 @@ impl IntoIterator for DirectoryHasher {
         let cancel_handle = self.cancel_handle();
         let manifest_handle = thread::spawn(|| self.hash());
         Self::IntoIter {
-            rx,
             cancel_handle,
             manifest_handle,
+            rx,
         }
     }
 }
