@@ -1,7 +1,8 @@
-use crate::{HASHFILE, HashingError, hasher::DirectoryHasher};
+use crate::{HASHFILE, hasher::DirectoryHasher};
 use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 use rayon::Scope;
+use std::io;
 
 const ERROR_CAP_DEFAULT: usize = 1 << 2;
 const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
@@ -14,7 +15,7 @@ macro_rules! unwrap_or_push_error_and_return {
         match ($fallible_expr) {
             Ok(v) => v,
             Err(e) => {
-                ($errors).lock().push(e.into());
+                ($errors).lock().push(e);
                 return;
             }
         }
@@ -24,7 +25,7 @@ macro_rules! unwrap_or_push_error_and_return {
 /// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
     directory_hasher: &'a DirectoryHasher,
-    errors: Mutex<Vec<HashingError>>,
+    errors: Mutex<Vec<io::Error>>,
     paths: Mutex<Vec<Utf8PathBuf>>,
 }
 
@@ -41,7 +42,7 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 impl<'a> FileFinder<'a> {
     /// Returns a list of all files within the directory specified.
     #[inline(never)]
-    pub fn find(self) -> Result<Vec<Utf8PathBuf>, HashingError> {
+    pub fn find(self) -> Result<Vec<Utf8PathBuf>, io::Error> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
         rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
         // If any errors were found, we only propagate the first.
@@ -51,8 +52,13 @@ impl<'a> FileFinder<'a> {
         }
     }
 
-    /// Iterates over all files and folders in `dir_path`, appending the paths of files to the internal
-    /// `self.paths` buffer and spawning new `recurse_directory` instances for each new directory.
+    /// Iterates over all entries in `dir_path`.
+    ///
+    /// Files are appended to the internal `self.paths` buffer.
+    ///
+    /// Directories spawn new instances of `recurse_directory` with themselves as `dir_path`.
+    ///
+    /// Symlinks are ignored (fuck symlinks).
     #[inline(never)]
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
         // Only checked once to minimize lock contention.
@@ -60,7 +66,7 @@ impl<'a> FileFinder<'a> {
             return;
         }
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
-        // Per-directory buffer so we only need to lock `self.paths` once.
+        // Per-directory buffer so `self.paths` only needs to be locked once.
         let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, self.errors);
@@ -75,7 +81,10 @@ impl<'a> FileFinder<'a> {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
             }
         }
-        self.paths.lock().extend(paths_local);
+        // Only lock `self.paths` if `dir_path` contains files.
+        if !paths_local.is_empty() {
+            self.paths.lock().extend(paths_local);
+        }
     }
 
     /// What do you think it does lol.
@@ -88,7 +97,7 @@ impl<'a> FileFinder<'a> {
             );
         }
         if self.directory_hasher.respect_hidden {
-            // The hashfile itself is hidden, so we don't need to explicitly
+            // The hashfile itself is hidden, so there's no need to explicitly
             // check for it when respecting hidden entries.
             file_name.starts_with(HIDDEN_ENTRY_PREFIX)
         } else {

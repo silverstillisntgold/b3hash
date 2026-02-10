@@ -1,3 +1,5 @@
 # B3Hash
 
-A crate for creating/validating directory tree hashfiles.
+**This crate is considered feature complete.**
+
+A crate for creating and validating directory hashfiles.

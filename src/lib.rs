@@ -1,6 +1,8 @@
 /*!
 # B3Hash
 
+**This crate is considered feature complete.**
+
 A crate for creating and validating directory hashfiles.
 */
 
@@ -11,7 +13,7 @@ mod hasher;
 mod manifest;
 mod verifier;
 
-pub use hasher::*;
+pub use self::hasher::*;
 pub use manifest::*;
 pub use verifier::*;
 

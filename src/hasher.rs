@@ -72,7 +72,10 @@ impl Iterator for DirectoryHasherIter {
 }
 
 impl DirectoryHasherIter {
-    /// Cancels file hashing (if any files remain) and closes the backing thread.
+    /// Cancels file hashing (if any files remain) and closes the backing thread,
+    /// discarding the resulting [`HashingError::Canceled`].
+    ///
+    /// Note that this method may block while any in-progress file hashing completes.
     pub fn cancel(self) {
         self.cancel_handle.store(true, Ordering::Relaxed);
         // Make sure the thread is joined, otherwise it ends up detached.
@@ -155,8 +158,7 @@ impl IntoIterator for DirectoryHasher {
     fn into_iter(mut self) -> Self::IntoIter {
         // Using a bounded, 0-length channel so the backing computation
         // thread only progresses when calling `next` on the iterator.
-        const CHANNEL_CAP: usize = 0;
-        let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
+        let (tx, rx) = crossbeam_channel::bounded(0);
         self.progress_channel = Some(tx);
         let cancel_handle = self.cancel_handle();
         let manifest_handle = thread::spawn(|| self.hash());
@@ -203,9 +205,7 @@ impl DirectoryHasher {
         self.hash_directory(entries)
     }
 
-    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing
-    /// the file located at each target path.
-    /// Can be terminated early if the user has acquired a cancel handle.
+    /// Maps all items in `file_list` from [`Utf8PathBuf`] to [`Entry`] by hashing the file located at each path.
     fn hash_files(&self, file_list: Vec<Utf8PathBuf>) -> Result<Vec<Entry>, HashingError> {
         file_list
             .into_par_iter()
@@ -279,7 +279,7 @@ impl DirectoryHasher {
         unsafe { path.as_str().get_unchecked(self.prefix_len..) }
     }
 
-    /// Attaches a cancel handle to `self` for mid-process cancelation.
+    /// Attaches an internal cancel handle to `self` for early cancelation of file hashing.
     fn cancel_handle(&mut self) -> Arc<AtomicBool> {
         let cancel_handle = Arc::new(AtomicBool::new(false));
         self.cancel_handle = Some(cancel_handle.clone());

@@ -2,6 +2,12 @@
 name = "b3hash"
 version = "0.1.0"
 edition = "2024"
+description = ""
+documentation = ""
+repository = ""
+categories = []
+keywords = []
+license = "MIT"
 
 [dependencies]
 blake3 = { version = "1.8.3", features = ["serde"] }

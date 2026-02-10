@@ -4,17 +4,20 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+// For doc links.
+#[allow(unused)]
+use crate::hasher::{DirectoryHasher, DirectoryHasherIter};
+
 const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 
-/// The result of hashing a [`DirectoryHasher`](crate::hasher::DirectoryHasher)
-/// or consuming the entirety of a [`DirectoryHasherIter`](crate::hasher::DirectoryHasherIter).
+/// The result of calling [`DirectoryHasher::hash`], or consuming the entirety of a [`DirectoryHasherIter`].
 ///
 /// Can be serialized into a b3hash file with [`Self::serialize`], or used to verify against
 /// another [`Manifest`] using [`verify`](crate::verifier::verify).
 ///
 /// If a `Manifest` instance is the result of calling [`Self::deserialize`], then it is
 /// not possible to reserialize it. That is to say that [`Manifest`]'s can only be serialized
-/// when they come directly from a `DirectoryHasher` or it's iterator.
+/// when they come directly from a [`DirectoryHasher`] or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     /// Contains the original path of the directory being hashed.
@@ -30,8 +33,8 @@ pub struct Manifest {
 impl Manifest {
     /// Attempts to serialize `self` into a new b3hash file, returning `Ok(true)` on success.
     ///
-    /// If `self` was derived from any source other than an original [`DirectoryHasher`](crate::hasher::DirectoryHasher)
-    /// or it's iterator, this will always return `Ok(false)`.
+    /// If `self` was derived from any source other than an original [`DirectoryHasher`]
+    /// or it's iterator, this will return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
         match &self.directory_path {
@@ -70,33 +73,42 @@ impl Manifest {
         serde_json::from_slice(&source).map_err(Into::into)
     }
 
-    /// Returns the name of the directory.
+    /// Returns the path which was used to create `self`.
     ///
-    /// This is the name of the root directory which was hashed to generate this [`Manifest`].
+    /// This will only be `Some` if `self` comes from a [`DirectoryHasher`] or
+    /// [`DirectoryHasherIter`]. It will always be fully canonicalized.
+    #[inline]
+    pub fn path(&self) -> Option<&Utf8Path> {
+        self.directory_path.as_deref()
+    }
+
+    /// Returns the name of `self`.
+    ///
+    /// This is the name of the root directory which was hashed to generate `self`.
     #[inline]
     pub fn name(&self) -> &str {
         &self.directory_name
     }
 
-    /// Returns the hash of the directory.
+    /// Returns the hash of `self`.
     ///
-    /// This is the cumulative hash of all [`Entry`]'s within the original root directory.
+    /// This is the cumulative hash of all [`Entry`]'s within the root directory.
     #[inline]
     pub fn hash(&self) -> &Hash {
         &self.directory_hash
     }
 
-    /// Returns the size of the directory, in bytes.
+    /// Returns the size of `self`, in bytes.
     ///
-    /// This is the cumulative size of all files within the original directory.
+    /// This is the cumulative size of all [`Entry`]'s within the root directory.
     #[inline]
     pub fn size(&self) -> u64 {
         self.directory_size
     }
 
-    /// Returns a slice containing all [`Entry`]'s which make up this [`Manifest`].
+    /// Returns a slice containing all [`Entry`]'s which make up `self`.
     ///
-    /// This slice is always sorted by the `path` field of each entry.
+    /// The returned slice is sorted by the `path` field of each [`Entry`].
     #[inline]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
@@ -114,20 +126,20 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Returns the path of this [`Entry`], relative to the root directory,
-    /// but stripped of that directories name.
+    /// Returns the path of `self`, relative to the root directory,
+    /// but stripped of that root directories name.
     #[inline]
     pub fn path(&self) -> &Utf8Path {
         &self.path
     }
 
-    /// Returns the hash of this [`Entry`].
+    /// Returns the hash of `self`.
     #[inline]
     pub fn hash(&self) -> &Hash {
         &self.hash
     }
 
-    /// Returns the size of this [`Entry`], in bytes.
+    /// Returns the size of `self`, in bytes.
     #[inline]
     pub fn size(&self) -> u64 {
         self.size
