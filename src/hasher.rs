@@ -213,6 +213,7 @@ impl DirectoryHasher {
                 if let Some(cancel_handle) = &self.cancel_handle
                     && cancel_handle.load(Ordering::Relaxed)
                 {
+                    std::hint::cold_path();
                     return Err(HashingError::Canceled);
                 }
                 let mut hasher = Hasher::new();

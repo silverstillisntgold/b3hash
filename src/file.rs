@@ -81,7 +81,7 @@ impl<'a> FileFinder<'a> {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
             }
         }
-        // Only lock `self.paths` if `dir_path` contains files.
+        // Avoid locking `self.paths` when current `dir_path` only contains directories.
         if !paths_local.is_empty() {
             self.paths.lock().extend(paths_local);
         }
