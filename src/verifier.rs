@@ -14,7 +14,7 @@ pub struct DiffResult {
 impl DiffResult {
     /// Returns entries which only existed in the old [`Manifest`].
     ///
-    /// The entries in this slice are **missing** from the **new** `Manifest`.
+    /// The entries in this slice are missing from the new `Manifest`.
     #[inline]
     pub fn old_only(&self) -> &[Entry] {
         &self.old_only
@@ -22,7 +22,7 @@ impl DiffResult {
 
     /// Returns entries which only existed in the new [`Manifest`].
     ///
-    /// The entries in this slice are **missing** from the **old** `Manifest`.
+    /// The entries in this slice are missing from the old `Manifest`.
     #[inline]
     pub fn new_only(&self) -> &[Entry] {
         &self.new_only
