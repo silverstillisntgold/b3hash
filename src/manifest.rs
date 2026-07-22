@@ -15,7 +15,7 @@ const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 /// Can be serialized into a b3hash file with [`Self::serialize`], or used to verify against
 /// another [`Manifest`] using [`verify`](crate::verifier::verify).
 ///
-/// If a `Manifest` instance is the result of calling [`Self::deserialize`], then it is
+/// If a [`Manifest`] instance is the result of calling [`Self::deserialize`], then it is
 /// not possible to reserialize it. That is to say that [`Manifest`]'s can only be serialized
 /// when they come directly from a [`DirectoryHasher`] or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,19 +34,19 @@ impl Manifest {
     /// Attempts to serialize `self` into a new b3hash file, returning `Ok(true)` on success.
     ///
     /// If `self` was derived from any source other than an original [`DirectoryHasher`]
-    /// or it's iterator, this will always return `Ok(false)`.
+    /// or [`DirectoryHasherIter`], this will always return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
-        match &self.directory_path {
-            Some(path) => {
-                let path = path.join(HASHFILE);
-                let source = serde_json::to_vec(&self)?;
-                let contents = zstd::encode_all(source.as_slice(), COMPRESSION_LEVEL)?;
-                fs::write(path, contents)?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        const MEGABYTE: usize = 1 << 20;
+        let Some(path) = self.path().map(|path| path.join(HASHFILE)) else {
+            return Ok(false);
+        };
+        let buffer = Vec::with_capacity(8 * MEGABYTE);
+        let mut encoder = zstd::Encoder::new(buffer, COMPRESSION_LEVEL)?;
+        serde_json::to_writer(&mut encoder, &self)?;
+        let contents = encoder.finish()?;
+        fs::write(path, contents)?;
+        Ok(true)
     }
 
     /// Atttempts to deserialize the contents of the b3hash file within the `path`
@@ -64,18 +64,18 @@ impl Manifest {
         Self::deserialize_internal(path.as_ref())
     }
 
-    /// Internal use, see [`Self::deserialize`] for documentation.
+    /// See [`Self::deserialize`] for documentation.
     #[inline(never)]
     fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, SerdeError> {
         let path = path.join(HASHFILE);
-        let contents = fs::read(path)?;
-        let source = zstd::decode_all(contents.as_slice())?;
-        serde_json::from_slice(&source).map_err(Into::into)
+        let file = fs::File::open(path)?;
+        let decoder = zstd::Decoder::new(file)?;
+        serde_json::from_reader(decoder).map_err(Into::into)
     }
 
     /// Returns the path which was used to create `self`.
     ///
-    /// This will only be `Some` if `self` comes from a [`DirectoryHasher`] or
+    /// This will only return `Some` if `self` comes from a [`DirectoryHasher`] or
     /// [`DirectoryHasherIter`]. It will always be fully canonicalized.
     #[inline]
     pub fn path(&self) -> Option<&Utf8Path> {
@@ -108,7 +108,8 @@ impl Manifest {
 
     /// Returns a slice containing all [`Entry`]'s which make up `self`.
     ///
-    /// The returned slice is sorted by the `path` field of each [`Entry`].
+    /// The returned slice is sorted by the `path` field of each [`Entry`],
+    /// when said `path` is in it's [`str`] representation.
     #[inline]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
