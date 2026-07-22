@@ -35,7 +35,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
 /// # Warning
 ///
 /// Because this type contains a [`JoinHandle`], dropping it mid-process causes the handle to become detached.
-/// The iterator should generally be consumed with one of [`Self::into_manifest`] or [`Self::into_manifest_with`].
+/// The iterator should generally be consumed with [`Self::into_manifest`] or [`Self::into_manifest_with`].
 ///
 /// If you are using standard [`Iterator`] functions to consume the iterator, you **must** call
 /// [`Self::cancel`] or [`Self::into_manifest`] after the iterator is exhausted.
@@ -96,8 +96,8 @@ impl DirectoryHasherIter {
         for path in &mut self {
             f(path);
         }
-        // Because we never unwrap/expect anywhere else, this should only fail when
-        // we have an underlying library failure, which we can't handle anyway.
+        // Because we never unwrap/expect anywhere else, this should only panic when
+        // we have an underlying library/OS failure which is out of our control.
         self.manifest_handle.join().unwrap()
     }
 }
@@ -171,7 +171,7 @@ impl IntoIterator for DirectoryHasher {
 }
 
 impl DirectoryHasher {
-    /// Consumes `self` to hash the contents of the given directory and returns the resulting [`Manifest`].
+    /// Consumes `self` to hash the contents of the given directory and return the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
         // Canonicalize here so we always have the correct name of the directory being hashed.
@@ -180,10 +180,10 @@ impl DirectoryHasher {
         // Need to do this here since we've just altered `self.directory_path`.
         //
         // path/  --> len == 5
-        // 012345 --> we want to start at 5 to avoid the slash
+        // 012345 --> we want to start at index 5 (len) to avoid the slash
         //
         // path   --> len == 4
-        // 012345 --> we want to start at 5 to avoid the slash that deeper paths will add
+        // 012345 --> we still want to start at index 5 (len + 1) to avoid the slash that deeper paths will add
         self.prefix_len = {
             let s = self.directory_path.as_str();
             if s.ends_with('/') || s.ends_with('\\') {
@@ -213,21 +213,25 @@ impl DirectoryHasher {
                 if let Some(cancel_handle) = &self.cancel_handle
                     && cancel_handle.load(Ordering::Relaxed)
                 {
-                    std::hint::cold_path();
                     return Err(HashingError::Canceled);
                 }
                 let mut hasher = Hasher::new();
+                // We want to use a reader here because we will likely be reading many large
+                // files at once. If we were to buffer them into memory we'd quickly run out
+                // and probably crash the system, and using memory mapping makes the system
+                // extremely unresponsive. The buffered direct file reading provided by blake3
+                // is a perfect middle ground for our implementation.
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
                 let path = fuck_windows(self.strip_prefix(file_path.as_path()));
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of
-                // bytes hashed represents the size of the file hashed.
+                // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
                     // If this would propagate an error, we've already canceled hashing and
                     // returned the appropriate error, so we can ignore this one.
-                    let _ = tx.send(file_path);
+                    let _ = tx.send(path.clone());
                 }
                 Ok(Entry { path, hash, size })
             })
@@ -246,11 +250,12 @@ impl DirectoryHasher {
             .file_name()
             .unwrap_or(self.directory_path.as_str())
             .to_owned();
+        let directory_path = Some(self.directory_path);
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
-        // There are faster ways to do this, but this simple and non-allocating approach is preferred.
-        // We want to hash all contents of each entry, so **any** small change to
-        // an entry is reflected in the final directory hash.
+        // There are faster ways to do this, but this simple and non-allocating approach
+        // is preferred. We want to hash all contents of each entry, so that any change to
+        // any entry is reflected in the final directory hash.
         for entry in &entries {
             // WARNING: Changing the order in which these fields are fed to
             // the hasher will change the final value of `directory_hash`.
@@ -261,7 +266,7 @@ impl DirectoryHasher {
         }
         let directory_hash = hasher.finalize();
         Ok(Manifest {
-            directory_path: Some(self.directory_path),
+            directory_path,
             directory_name,
             directory_hash,
             directory_size,
