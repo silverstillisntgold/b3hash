@@ -13,7 +13,7 @@ mod hasher;
 mod manifest;
 mod verifier;
 
-pub use self::hasher::*;
+pub use self::hasher::{DirectoryHasher, DirectoryHasherIter};
 pub use manifest::*;
 pub use verifier::*;
 
@@ -31,7 +31,7 @@ pub enum HashingError {
     Io(#[from] std::io::Error),
 }
 
-/// An error which can occur when serializing or deserializing a [`Manifest`].
+/// An error which can occur when serializing/deserializing a [`Manifest`].
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {
