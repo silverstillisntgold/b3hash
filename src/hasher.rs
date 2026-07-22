@@ -5,13 +5,13 @@ use crate::{
 };
 use blake3::Hasher;
 use camino::{Utf8Path, Utf8PathBuf};
-use crossbeam_channel::{Receiver, Sender};
 use rayon::prelude::*;
 use std::{
     fs,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread::{self, JoinHandle},
 };
@@ -23,7 +23,7 @@ fn fuck_windows(s: &str) -> Utf8PathBuf {
         // Codegen for this shit is actually insanely good.
         s.replace('\\', "/")
     } else {
-        s.to_string()
+        s.to_owned()
     }
     .into() // This conversion is free.
 }
@@ -138,11 +138,11 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
-    /// Optional [`Sender`] for sending paths of hashed files to a [`Receiver`].
+    /// Optional [`SyncSender`] for sending paths of hashed files to a [`Receiver`].
     ///
     /// The order in which file paths are sent over this channel is non-deterministic.
     #[builder(skip)]
-    progress_channel: Option<Sender<Utf8PathBuf>>,
+    progress_channel: Option<SyncSender<Utf8PathBuf>>,
 
     /// Optional cancel handle for canceling hashing operation early from outside.
     ///
@@ -158,7 +158,7 @@ impl IntoIterator for DirectoryHasher {
     fn into_iter(mut self) -> Self::IntoIter {
         // Using a bounded, 0-length channel so the backing computation
         // thread only progresses when calling `next` on the iterator.
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        let (tx, rx) = mpsc::sync_channel(0);
         self.progress_channel = Some(tx);
         let cancel_handle = self.cancel_handle();
         let manifest_handle = thread::spawn(|| self.hash());
@@ -245,7 +245,7 @@ impl DirectoryHasher {
             .directory_path
             .file_name()
             .unwrap_or(self.directory_path.as_str())
-            .to_string();
+            .to_owned();
         let mut hasher = Hasher::new();
         let mut directory_size = 0;
         // There are faster ways to do this, but this simple and non-allocating approach is preferred.

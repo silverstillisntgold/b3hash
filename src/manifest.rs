@@ -34,7 +34,7 @@ impl Manifest {
     /// Attempts to serialize `self` into a new b3hash file, returning `Ok(true)` on success.
     ///
     /// If `self` was derived from any source other than an original [`DirectoryHasher`]
-    /// or it's iterator, this will return `Ok(false)`.
+    /// or it's iterator, this will always return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
         match &self.directory_path {
@@ -117,7 +117,7 @@ impl Manifest {
 
 /// Struct containing the data of a hashed file.
 ///
-/// Only exists within the context of a parent [`Manifest`].
+/// Only exists within a parent [`Manifest`].
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Entry {
     pub(crate) path: Utf8PathBuf,

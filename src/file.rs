@@ -59,7 +59,6 @@ impl<'a> FileFinder<'a> {
     /// Directories spawn new instances of `recurse_directory` with themselves as `dir_path`.
     ///
     /// Symlinks are ignored (fuck symlinks).
-    #[inline(never)]
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
         // Only checked once to minimize lock contention.
         if !self.errors.lock().is_empty() {
@@ -74,6 +73,9 @@ impl<'a> FileFinder<'a> {
                 continue;
             }
             let file_type = unwrap_or_push_error_and_return!(entry.file_type(), self.errors);
+            // We store paths instead of entries because entries can be
+            // fucking massive (632 bytes on Windows), but paths are always
+            // just a fancy wrapper for an underlying vector (32 bytes).
             let path = entry.into_path();
             if file_type.is_file() {
                 paths_local.push(path);
@@ -93,12 +95,12 @@ impl<'a> FileFinder<'a> {
         const {
             assert!(
                 *HASHFILE.as_bytes().first().unwrap() == HIDDEN_ENTRY_PREFIX as u8,
-                "we're operating on the assumption that `HASHFILE` is hidden"
+                "we're operating on the assumption that \"HASHFILE\" is hidden"
             );
         }
         if self.directory_hasher.respect_hidden {
             // The hashfile itself is hidden, so there's no need to explicitly
-            // check for it when respecting hidden entries.
+            // check for it when we're already respecting hidden entries.
             file_name.starts_with(HIDDEN_ENTRY_PREFIX)
         } else {
             file_name.eq(HASHFILE)
