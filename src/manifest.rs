@@ -20,7 +20,7 @@ const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 /// when they come directly from a [`DirectoryHasher`] or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
-    /// Contains the original path of the directory being hashed.
+    /// Contains the original, canonicalized path of the directory being hashed.
     /// Only contains `Some` when created from a directory hasher.
     #[serde(skip)]
     pub(crate) directory_path: Option<Utf8PathBuf>,
