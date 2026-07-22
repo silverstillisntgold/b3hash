@@ -4,9 +4,9 @@ use parking_lot::Mutex;
 use rayon::Scope;
 use std::io;
 
-const ERROR_CAP_DEFAULT: usize = 1 << 2;
-const FILE_CAP_DEFAULT_GLOBAL: usize = 1 << 20;
-const FILE_CAP_DEFAULT_LOCAL: usize = 1 << 10;
+const ERROR_CAPACITY: usize = 1 << 2;
+const FILE_CAPACITY_GLOBAL: usize = 1 << 20;
+const FILE_CAPACITY_LOCAL: usize = 1 << 10;
 const HIDDEN_ENTRY_PREFIX: char = '.';
 
 /// Utility macro so I don't have to retype this shit.
@@ -33,8 +33,8 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
     fn from(value: &'a DirectoryHasher) -> Self {
         Self {
             directory_hasher: value,
-            errors: Mutex::new(Vec::with_capacity(ERROR_CAP_DEFAULT)),
-            paths: Mutex::new(Vec::with_capacity(FILE_CAP_DEFAULT_GLOBAL)),
+            errors: Mutex::new(Vec::with_capacity(ERROR_CAPACITY)),
+            paths: Mutex::new(Vec::with_capacity(FILE_CAPACITY_GLOBAL)),
         }
     }
 }
@@ -66,7 +66,7 @@ impl<'a> FileFinder<'a> {
         }
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
         // Per-directory buffer so `self.paths` only needs to be locked once.
-        let mut paths_local = Vec::with_capacity(FILE_CAP_DEFAULT_LOCAL);
+        let mut paths_local = Vec::with_capacity(FILE_CAPACITY_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, self.errors);
             if self.should_skip(entry.file_name()) {
