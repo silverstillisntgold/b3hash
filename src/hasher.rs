@@ -155,13 +155,20 @@ impl IntoIterator for DirectoryHasher {
 }
 
 impl DirectoryHasher {
-    /// Hashes the contents of the given directory and returns the resulting [`Manifest`].
+    /// Hashes the contents of the specified directory and returns the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
-        // Canonicalize so we always have the full path of the directory being hashed.
+        // Canonicalize to avoid any potential issues with relative paths.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
         let file_list = FileFinder::from(&self).find()?;
-        let entries = self.hash_files(file_list)?;
+        let mut entries = self.hash_files(file_list)?;
+        // Because we've canonicalized the directory path, all the elements in `file_list` will also
+        // have canonicalized paths, which increases the number of components in each `Utf8PathBuf`.
+        // The comparison of `Utf8PathBuf` operates on it's components, so more components means the
+        // comparison takes longer. And having fully canonicalized paths makes it as long as possible.
+        // Doing sorting here means we are comparing the paths after they've been stripped of
+        // their common prefix (directory path and all it's parents), which makes comparison much faster.
+        entries.sort_unstable_by(|a, b| a.path().cmp(b.path()));
         self.hash_directory(entries)
     }
 
