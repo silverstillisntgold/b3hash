@@ -154,10 +154,10 @@ impl IntoIterator for DirectoryHasher {
 }
 
 impl DirectoryHasher {
-    /// Consumes `self` to hash the contents of the given directory and return the resulting [`Manifest`].
+    /// Hashes the contents of the given directory and returns the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
-        // Canonicalize so we always have the correct full path of the directory being hashed.
+        // Canonicalize so we always have the full path of the directory being hashed.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
         let file_list = FileFinder::from(&self).find()?;
         let entries = self.hash_files(file_list)?;
