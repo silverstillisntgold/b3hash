@@ -1,6 +1,7 @@
-use crate::{HASHFILE, SerdeError};
-use blake3::{Hash, Hasher};
+use crate::{HASHFILE, SerdeError, hash_entries};
+use blake3::Hash;
 use camino::{Utf8Path, Utf8PathBuf};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
@@ -8,7 +9,7 @@ use std::fs;
 #[allow(unused)]
 use crate::hasher::{DirectoryHasher, DirectoryHasherIter};
 
-const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
+const COMPRESSION_LEVEL: i32 = 7;
 
 /// The result of calling [`DirectoryHasher::hash`], or consuming the entirety of a [`DirectoryHasherIter`].
 ///
@@ -70,7 +71,30 @@ impl Manifest {
         let path = path.join(HASHFILE);
         let file = fs::File::open(path)?;
         let decoder = zstd::Decoder::new(file)?;
-        serde_json::from_reader(decoder).map_err(Into::into)
+        let m: Manifest = serde_json::from_reader(decoder)?;
+
+        // Make sure all entries are sorted.
+        if !m.entries().is_sorted_by_key(Entry::path) {
+            return Err(SerdeError::Validation);
+        }
+
+        // Make sure all entries are unique. We can use this simple and fast
+        // approach because we've just ensured that entries are sorted.
+        let has_no_duplicates = m
+            .entries
+            .par_array_windows::<2>()
+            .all(|[a, b]| a.path() != b.path());
+        if has_no_duplicates {
+            return Err(SerdeError::Validation);
+        }
+
+        // Make sure the global hash and size are accurate.
+        let (hash, size) = hash_entries(&m.entries);
+        if size != m.directory_size || hash.as_bytes() != m.directory_hash.as_bytes() {
+            return Err(SerdeError::Validation);
+        }
+
+        Ok(m)
     }
 
     /// Returns the path which was used to create `self`.
@@ -144,16 +168,5 @@ impl Entry {
     #[inline]
     pub fn size(&self) -> u64 {
         self.size
-    }
-
-    /// Uses `hasher` to hash all internal fields in sequence.
-    #[inline]
-    pub(crate) fn hash_fields(&self, hasher: &mut Hasher) {
-        // Explicitly use LE to avoid differences across platforms.
-        let size_as_bytes = self.size.to_le_bytes();
-        // WARNING: Changing the order in which these fields are fed to
-        // the hasher will change the final value of `directory_hash`.
-        hasher.update(self.hash.as_bytes());
-        hasher.update(&size_as_bytes);
     }
 }
