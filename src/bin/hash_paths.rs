@@ -25,7 +25,7 @@ fn single_path(path: String) -> Result<Manifest, HashingError> {
     println!("hashing successful, completed in:");
     println!("\t{:.2} seconds", delta);
     println!("\t{:.2} ms", delta * 1e3);
-    println!("directory path: {:?}", res.path());
+    println!("directory path: {:?}", res.path().map(|path| path.as_str()));
     println!("directory name: {}", res.name());
     println!("directory hash: {}", res.hash());
     println!("directory size: {} bytes", res.size());

@@ -4,7 +4,7 @@ use crate::{
     manifest::{Entry, Manifest},
 };
 use blake3::Hasher;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use rayon::prelude::*;
 use std::{
     fs,
@@ -15,18 +15,6 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
-
-/// Windows always has to be so funny and unique >:(
-#[inline]
-fn fuck_windows(s: &str) -> Utf8PathBuf {
-    if cfg!(windows) {
-        // Codegen for this shit is actually insanely good.
-        s.replace('\\', "/")
-    } else {
-        s.to_owned()
-    }
-    .into() // This conversion is free.
-}
 
 /// Iterator over the paths of all files hashed by the source [`DirectoryHasher`].
 ///
@@ -97,7 +85,7 @@ impl DirectoryHasherIter {
             f(path);
         }
         // Because we never unwrap/expect anywhere else, this should only panic when
-        // we have an underlying library/OS failure which is out of our control.
+        // we have an underlying library/OS failure, which is out of our control.
         self.manifest_handle.join().unwrap()
     }
 }
@@ -128,11 +116,6 @@ impl DirectoryHasherIter {
 pub struct DirectoryHasher {
     /// Path to the directory that will be hashed.
     pub(crate) directory_path: Utf8PathBuf,
-
-    /// Contains the length of `directory_path` when it is the leading
-    /// component of a file or directory beneath it.
-    #[builder(skip)]
-    prefix_len: usize,
 
     /// Should files and directories beginning with `.` be skipped?
     #[builder(default = true)]
@@ -174,33 +157,9 @@ impl DirectoryHasher {
     /// Consumes `self` to hash the contents of the given directory and return the resulting [`Manifest`].
     #[inline(never)]
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
-        // Canonicalize here so we always have the correct name of the directory being hashed.
+        // Canonicalize so we always have the correct full path of the directory being hashed.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
-        // This ensures that we never include a leading `/` or `\` when stripping paths.
-        // Need to do this here since we've just altered `self.directory_path`.
-        //
-        // path/  --> len == 5
-        // 012345 --> we want to start at index 5 (len) to avoid the slash
-        //
-        // path   --> len == 4
-        // 012345 --> we still want to start at index 5 (len + 1) to avoid the slash that deeper paths will add
-        self.prefix_len = {
-            let s = self.directory_path.as_str();
-            if s.ends_with('/') || s.ends_with('\\') {
-                s.len()
-            } else {
-                s.len() + 1
-            }
-        };
-        let mut file_list = FileFinder::from(&self).find()?;
-        // Stable sorting has no use here because file paths are inherently unique.
-        file_list.sort_unstable_by(|a, b| {
-            // We don't know how long the root directory prefix will be, so it's best
-            // to strip it out to minimize the time spent comparing elements.
-            let a_stripped = self.strip_prefix(a.as_path());
-            let b_stripped = self.strip_prefix(b.as_path());
-            a_stripped.cmp(b_stripped)
-        });
+        let file_list = FileFinder::from(&self).find()?;
         let entries = self.hash_files(file_list)?;
         self.hash_directory(entries)
     }
@@ -223,7 +182,7 @@ impl DirectoryHasher {
                 // is a perfect middle ground for our implementation.
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
-                let path = fuck_windows(self.strip_prefix(file_path.as_path()));
+                let path = file_path;
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of
                 // bytes hashed represents the size of the file in bytes.
@@ -272,17 +231,6 @@ impl DirectoryHasher {
             directory_size,
             entries,
         })
-    }
-
-    /// Strips the root directory prefix (including it's trailing slash) from `path`,
-    /// returning the child path relative to the root directory.
-    #[inline]
-    fn strip_prefix<'a>(&self, path: &'a Utf8Path) -> &'a str {
-        // SAFETY: Because all files are descendants of `self.directory_path`,
-        // they all must have it as a prefix. And because `self.prefix_len`
-        // holds the index which is the start of the relative path, this will
-        // always return the entire relative path without the root directory.
-        unsafe { path.as_str().get_unchecked(self.prefix_len..) }
     }
 
     /// Attaches an internal cancel handle to `self` for early cancelation of file hashing.

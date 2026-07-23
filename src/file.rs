@@ -40,14 +40,19 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 }
 
 impl<'a> FileFinder<'a> {
-    /// Returns a list of all files within the directory specified.
+    /// Returns a sorted list of all files within the directory specified.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, io::Error> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
         rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
         // If any errors were found, we only propagate the first.
         match self.errors.into_inner().into_iter().next() {
-            None => Ok(self.paths.into_inner()),
+            None => {
+                let mut paths = self.paths.into_inner();
+                // File paths are inherently unique so unstable sorting is fine.
+                paths.sort_unstable();
+                Ok(paths)
+            }
             Some(e) => Err(e),
         }
     }
@@ -94,7 +99,7 @@ impl<'a> FileFinder<'a> {
     fn should_skip(&self, file_name: &str) -> bool {
         const {
             assert!(
-                *HASHFILE.as_bytes().first().unwrap() == HIDDEN_ENTRY_PREFIX as u8,
+                HASHFILE.as_bytes()[0] == HIDDEN_ENTRY_PREFIX as u8,
                 "we're operating on the assumption that \"HASHFILE\" is hidden"
             );
         }
