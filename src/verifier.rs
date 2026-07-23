@@ -5,13 +5,13 @@ const CAPACITY: usize = 1 << 7;
 
 /// Contains the differences between the two [`Manifest`]'s which were used to call [`verify`].
 #[derive(Debug)]
-pub struct DiffResult {
+pub struct DirectoryDiff {
     old_only: Vec<Entry>,
     new_only: Vec<Entry>,
     changed: Vec<(Entry, Entry)>,
 }
 
-impl DiffResult {
+impl DirectoryDiff {
     /// Returns the entries which only existed in the old [`Manifest`].
     #[inline]
     pub fn old_only(&self) -> &[Entry] {
@@ -35,22 +35,13 @@ impl DiffResult {
 
 /// Compares the contents of two [`Manifest`]'s, returning [`None`] if they are the same.
 ///
-/// If any difference is found, a [`DiffResult`] is returned which contains information about
+/// If any difference is found, a [`DirectoryDiff`] is returned which contains information about
 /// how the two directories differ.
 ///
 /// Different root directory names/paths are allowed, because the name/path of a directory
 /// does not impact it's internal structure or the information it contains.
 #[inline(never)]
-pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
-    debug_assert!(
-        old_manifest.entries.is_sorted_by_key(|e| e.path()),
-        "all old manifest entries should have been sorted before hashing"
-    );
-    debug_assert!(
-        new_manifest.entries.is_sorted_by_key(|e| e.path()),
-        "all new manifest entries should have been sorted before hashing"
-    );
-
+pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DirectoryDiff> {
     // Fast path: If both the total size and the hash of two directories are identical,
     // the probability of there being a mismatch of internal data between the two is so
     // astronomically tiny that we can safely assume they are the same.
@@ -71,7 +62,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
     // If the `directory_size` and `directory_hash` values are not the same, then we know for
     // certain that there **must** be some kind of difference between the two manifests.
 
-    let mut result = DiffResult {
+    let mut result = DirectoryDiff {
         old_only: Vec::with_capacity(CAPACITY),
         new_only: Vec::with_capacity(CAPACITY),
         changed: Vec::with_capacity(CAPACITY),
