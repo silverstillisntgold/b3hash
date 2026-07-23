@@ -50,6 +50,9 @@ impl<'a> FileFinder<'a> {
             None => {
                 let mut paths = self.paths.into_inner();
                 // File paths are inherently unique so unstable sorting is fine.
+                // The `Ordering` implementation of `Utf8PathBuf` works on it's components
+                // instead of on it's raw string representation. This behavior should provide
+                // consistency across platforms which use different path component seperators.
                 paths.sort_unstable();
                 Ok(paths)
             }
