@@ -1,5 +1,5 @@
 use crate::{
-    HashingError,
+    HashingError, cumulative_entry_hash,
     file::FileFinder,
     manifest::{Entry, Manifest},
 };
@@ -213,20 +213,7 @@ impl DirectoryHasher {
             .unwrap_or(self.directory_path.as_str())
             .to_owned();
         let directory_path = Some(self.directory_path);
-        let mut hasher = Hasher::new();
-        let mut directory_size = 0;
-        // There are faster ways to do this, but this simple and non-allocating approach
-        // is preferred. We want to hash all contents of each entry, so that any change to
-        // any entry is reflected in the final directory hash.
-        for entry in &entries {
-            // WARNING: Changing the order in which these fields are fed to
-            // the hasher will change the final value of `directory_hash`.
-            hasher.update(entry.path.as_str().as_bytes());
-            hasher.update(entry.hash.as_bytes());
-            hasher.update(&entry.size.to_le_bytes());
-            directory_size += entry.size;
-        }
-        let directory_hash = hasher.finalize();
+        let (directory_hash, directory_size) = cumulative_entry_hash(&entries);
         Ok(Manifest {
             directory_path,
             directory_name,

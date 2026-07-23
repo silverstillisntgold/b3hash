@@ -41,3 +41,15 @@ pub enum SerdeError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
+
+/// Determines the cumulative hash of all members of `entries`.
+fn cumulative_entry_hash(entries: &[Entry]) -> (blake3::Hash, u64) {
+    let mut hasher = blake3::Hasher::new();
+    let mut size = 0;
+    for entry in entries {
+        entry.hash_fields(&mut hasher);
+        size += entry.size;
+    }
+    let hash = hasher.finalize();
+    (hash, size)
+}

@@ -1,5 +1,5 @@
 use crate::{HASHFILE, SerdeError};
-use blake3::Hash;
+use blake3::{Hash, Hasher};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -144,5 +144,16 @@ impl Entry {
     #[inline]
     pub fn size(&self) -> u64 {
         self.size
+    }
+
+    /// Uses `hasher` to hash all internal fields in sequence.
+    #[inline]
+    pub(crate) fn hash_fields(&self, hasher: &mut Hasher) {
+        // Explicitly use LE to avoid differences across platforms.
+        let size_as_bytes = self.size.to_le_bytes();
+        // WARNING: Changing the order in which these fields are fed to
+        // the hasher will change the final value of `directory_hash`.
+        hasher.update(self.hash.as_bytes());
+        hasher.update(&size_as_bytes);
     }
 }
