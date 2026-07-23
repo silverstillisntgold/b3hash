@@ -4,7 +4,7 @@ use crate::{
     manifest::{Entry, Manifest},
 };
 use blake3::Hasher;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use std::{
     fs,
@@ -182,7 +182,10 @@ impl DirectoryHasher {
                 // is a perfect middle ground for our implementation.
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
-                let path = file_path;
+                let path = file_path
+                    .strip_prefix(self.directory_path.as_path())
+                    .map(Utf8Path::to_path_buf)
+                    .expect("Because file paths come from beneath `self.directory_path`, they should all have it as a prefix");
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of
                 // bytes hashed represents the size of the file in bytes.

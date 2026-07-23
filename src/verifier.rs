@@ -43,11 +43,11 @@ impl DiffResult {
 #[inline(never)]
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResult> {
     debug_assert!(
-        old_manifest.entries.is_sorted_by_key(|e| e.path.as_str()),
+        old_manifest.entries.is_sorted_by_key(|e| e.path()),
         "all old manifest entries should have been sorted before hashing"
     );
     debug_assert!(
-        new_manifest.entries.is_sorted_by_key(|e| e.path.as_str()),
+        new_manifest.entries.is_sorted_by_key(|e| e.path()),
         "all new manifest entries should have been sorted before hashing"
     );
 
@@ -83,8 +83,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DiffResu
     let mut new_iter = new_manifest.entries.into_iter().peekable();
 
     while let (Some(old), Some(new)) = (old_iter.peek(), new_iter.peek()) {
-        // We use str comparisons because that's how we handle sorting in the hasher.
-        match old.path.as_str().cmp(new.path.as_str()) {
+        match old.path().cmp(new.path()) {
             Ordering::Equal => {
                 // Because the paths are equal both iterators are currently at the same
                 // position, and they must both be consumed to keep them in lockstep.
