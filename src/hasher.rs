@@ -1,6 +1,7 @@
 use crate::{
-    HashingError, cumulative_entry_hash,
+    HashingError,
     file::FileFinder,
+    hash_entries,
     manifest::{Entry, Manifest},
 };
 use blake3::Hasher;
@@ -185,7 +186,7 @@ impl DirectoryHasher {
                 let path = file_path
                     .strip_prefix(self.directory_path.as_path())
                     .map(Utf8Path::to_path_buf)
-                    .expect("Because file paths come from beneath `self.directory_path`, they should all have it as a prefix");
+                    .expect("all file paths should be children of `self.directory_path`");
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the amount of
                 // bytes hashed represents the size of the file in bytes.
@@ -213,7 +214,7 @@ impl DirectoryHasher {
             .unwrap_or(self.directory_path.as_str())
             .to_owned();
         let directory_path = Some(self.directory_path);
-        let (directory_hash, directory_size) = cumulative_entry_hash(&entries);
+        let (directory_hash, directory_size) = hash_entries(&entries);
         Ok(Manifest {
             directory_path,
             directory_name,

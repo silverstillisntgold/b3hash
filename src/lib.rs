@@ -43,7 +43,7 @@ pub enum SerdeError {
 }
 
 /// Determines the cumulative hash of all members of `entries`.
-fn cumulative_entry_hash(entries: &[Entry]) -> (blake3::Hash, u64) {
+fn hash_entries(entries: &[Entry]) -> (blake3::Hash, u64) {
     let mut hasher = blake3::Hasher::new();
     let mut size = 0;
     for entry in entries {
