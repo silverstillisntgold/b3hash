@@ -59,7 +59,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<Director
         return None;
     }
 
-    // If the `directory_size` and `directory_hash` values are not the same, then we know for
+    // Since the `directory_size` and `directory_hash` values were not the same, we know for
     // certain that there **must** be some kind of difference between the two manifests.
 
     let mut result = DirectoryDiff {
@@ -69,7 +69,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<Director
     };
 
     // These both need to be peekable because we need to be able to view the next entry
-    // in the iterators, but we only want to consume them under specific conditions.
+    // in each iterator, but we only want to consume them under specific conditions.
     let mut old_iter = old_manifest.entries.into_iter().peekable();
     let mut new_iter = new_manifest.entries.into_iter().peekable();
 

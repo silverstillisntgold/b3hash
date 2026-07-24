@@ -10,6 +10,7 @@ use std::fs;
 use crate::hasher::{DirectoryHasher, DirectoryHasherIter};
 
 const COMPRESSION_LEVEL: i32 = 7;
+const MEGABYTE: usize = 1 << 20;
 
 /// The result of calling [`DirectoryHasher::hash`], or consuming the entirety of a [`DirectoryHasherIter`].
 ///
@@ -34,14 +35,16 @@ pub struct Manifest {
 impl Manifest {
     /// Attempts to serialize `self` into a new b3hash file, returning `Ok(true)` on success.
     ///
-    /// If `self` was derived from any source other than an original [`DirectoryHasher`]
-    /// or [`DirectoryHasherIter`], this will always return `Ok(false)`.
+    /// If `self` was derived from any source other than a [`DirectoryHasher`] or
+    /// [`DirectoryHasherIter`], this will always return `Ok(false)`.
     #[inline(never)]
     pub fn serialize(self) -> Result<bool, SerdeError> {
-        const MEGABYTE: usize = 1 << 20;
         let Some(path) = self.path().map(|path| path.join(HASHFILE)) else {
             return Ok(false);
         };
+        if path.try_exists()? {
+            fs::remove_file(path.as_std_path())?;
+        }
         let buffer = Vec::with_capacity(8 * MEGABYTE);
         let mut encoder = zstd::Encoder::new(buffer, COMPRESSION_LEVEL)?;
         serde_json::to_writer(&mut encoder, &self)?;
@@ -80,11 +83,11 @@ impl Manifest {
 
         // Make sure all entries are unique. We can use this simple and fast
         // approach because we've just ensured that entries are sorted.
-        let has_no_duplicates = m
+        let has_duplicate = m
             .entries
             .par_array_windows::<2>()
-            .all(|[a, b]| a.path() != b.path());
-        if has_no_duplicates {
+            .any(|[a, b]| a.path().eq(b.path()));
+        if has_duplicate {
             return Err(SerdeError::Validation);
         }
 

@@ -39,7 +39,7 @@ pub enum SerdeError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    /// Indicates that there was an underlying Json error.
+    /// Indicates that there was an underlying JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 
@@ -52,12 +52,17 @@ pub enum SerdeError {
 fn hash_entries(entries: &[Entry]) -> (blake3::Hash, u64) {
     let mut hasher = blake3::Hasher::new();
     let mut size = 0;
+    // WARNING: Changing the order in which these fields are fed to the
+    // hasher will change the finalized hash value, so don't do that :).
     for entry in entries {
         // Explicitly use LE to avoid differences across platforms.
         let size_as_bytes = entry.size.to_le_bytes();
-        // WARNING: Changing the order in which these fields are
-        // fed to the hasher will change the finalized hash value,
-        // so don't do that :).
+        // Hashing each component individually instead of converting the
+        // path to a str and hashing that means we avoid having to worry
+        // about path component separator normalization.
+        for component in entry.path().components() {
+            hasher.update(component.as_str().as_bytes());
+        }
         hasher.update(entry.hash.as_bytes());
         hasher.update(&size_as_bytes);
         size += entry.size;
