@@ -62,8 +62,15 @@ fn hash_entries(entries: &[Entry]) -> (blake3::Hash, u64) {
         // Hashing each component individually instead of converting the
         // path to a str and hashing that means we avoid having to worry
         // about path component separator normalization.
-        for component in entry.path().components() {
-            hasher.update(component.as_str().as_bytes());
+        for s in entry
+            .path()
+            .components()
+            .map(|component| component.as_str())
+        {
+            // Explicitly use LE to avoid differences across platforms.
+            let len_as_bytes = s.len().to_le_bytes();
+            hasher.update(s.as_bytes());
+            hasher.update(&len_as_bytes);
         }
         hasher.update(entry.hash.as_bytes());
         hasher.update(&size_as_bytes);

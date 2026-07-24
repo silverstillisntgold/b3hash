@@ -85,7 +85,7 @@ impl DirectoryHasherIter {
         for path in &mut self {
             f(path);
         }
-        // Because we never unwrap/expect anywhere else, this should only panic when
+        // Because we should never panic anywhere else, this should only panic when
         // we have an underlying library/OS failure, which is out of our control.
         self.manifest_handle.join().unwrap()
     }
