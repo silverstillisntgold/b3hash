@@ -13,6 +13,8 @@ mod hasher;
 mod manifest;
 mod verifier;
 
+use std::sync::mpsc::SendError;
+
 pub use self::hasher::{DirectoryHasher, DirectoryHasherIter};
 pub use manifest::*;
 pub use verifier::*;
@@ -26,22 +28,26 @@ pub const HASHFILE: &str = ".b3hash";
 #[derive(Debug, thiserror::Error)]
 pub enum HashingError {
     /// Indicates that file hashing was canceled early.
-    #[error("file hashing canceled early")]
+    #[error("file hashing was canceled early")]
     Canceled,
 
-    /// Indicates that there was an underlying IO error.
+    /// Indicates that there was an IO error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// Indicates that there was a channel send error.
+    #[error(transparent)]
+    Send(#[from] SendError<Utf8PathBuf>),
 }
 
 /// An error that might occur when serializing/deserializing a [`Manifest`].
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {
-    /// Indicates that there was an underlying IO error.
+    /// Indicates that there was an IO error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    /// Indicates that there was an underlying JSON error.
+    /// Indicates that there was a JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 

@@ -199,9 +199,7 @@ impl DirectoryHasher {
                 // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
-                    // If this would propagate an error, we've already canceled hashing and
-                    // returned the appropriate error, so we can ignore this one.
-                    let _ = tx.send(path.clone());
+                    tx.send(path.clone())?;
                 }
                 Ok(Entry { path, hash, size })
             })
