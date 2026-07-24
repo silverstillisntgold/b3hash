@@ -195,7 +195,7 @@ impl DirectoryHasher {
                     .map(Utf8Path::to_path_buf)
                     .expect("all file paths should be children of `self.directory_path`");
                 let hash = hasher.finalize();
-                // Because we've only hashed a single file, the amount of
+                // Because we've only hashed a single file, the number of
                 // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
                 if let Some(tx) = &self.progress_channel {
