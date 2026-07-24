@@ -81,6 +81,19 @@ impl<'a> FileFinder<'a> {
                 paths_local.push(path);
             } else if file_type.is_dir() {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
+            } else {
+                if self.directory_hasher.follow_symlinks {
+                    let path =
+                        unwrap_or_push_error_and_return!(path.canonicalize_utf8(), self.errors);
+                    let metadata = unwrap_or_push_error_and_return!(path.metadata(), self.errors);
+                    if metadata.is_file() {
+                        paths_local.push(path);
+                    } else if metadata.is_dir() {
+                        scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
+                    } else {
+                        unreachable!("we've already resolved the symlink");
+                    }
+                }
             }
         }
         // Avoid locking `self.paths` when current `dir_path` only contains directories.
