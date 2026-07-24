@@ -184,7 +184,7 @@ impl DirectoryHasher {
                 }
                 let mut hasher = Hasher::new();
                 // We want to use a reader here because we will likely be reading many large
-                // files at once. If we were to buffer them into memory we'd quickly run out
+                // files at once. If we were to load them into memory we'd quickly run out
                 // and probably crash the system, and using memory mapping makes the system
                 // extremely unresponsive. The buffered direct file reading provided by blake3
                 // is a perfect middle ground for our implementation.
