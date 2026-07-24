@@ -17,6 +17,8 @@ pub use self::hasher::{DirectoryHasher, DirectoryHasherIter};
 pub use manifest::*;
 pub use verifier::*;
 
+pub use camino::{Utf8Path, Utf8PathBuf};
+
 /// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.
 pub const HASHFILE: &str = ".b3hash";
 

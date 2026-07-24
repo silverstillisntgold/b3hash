@@ -9,7 +9,7 @@ use std::fs;
 #[allow(unused)]
 use crate::hasher::{DirectoryHasher, DirectoryHasherIter};
 
-const COMPRESSION_LEVEL: i32 = 7;
+const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 const MEGABYTE: usize = 1 << 20;
 
 /// The result of calling [`DirectoryHasher::hash`], or consuming the entirety of a [`DirectoryHasherIter`].
@@ -42,9 +42,6 @@ impl Manifest {
         let Some(path) = self.path().map(|path| path.join(HASHFILE)) else {
             return Ok(false);
         };
-        if path.try_exists()? {
-            fs::remove_file(path.as_std_path())?;
-        }
         let buffer = Vec::with_capacity(8 * MEGABYTE);
         let mut encoder = zstd::Encoder::new(buffer, COMPRESSION_LEVEL)?;
         serde_json::to_writer(&mut encoder, &self)?;
@@ -55,6 +52,8 @@ impl Manifest {
 
     /// Atttempts to deserialize the contents of the b3hash file within the `path`
     /// directory and returns the resulting [`Manifest`].
+    ///
+    /// The `path` should point to the directory containing the hashfile, not to the hashfile itself.
     ///
     /// # Warning
     ///
