@@ -195,13 +195,16 @@ impl DirectoryHasher {
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
                 let path = file_path
-                    .strip_prefix(self.directory_path.as_path())
+                    .strip_prefix(self.directory_path.as_std_path())
                     .map(Utf8Path::to_path_buf)
                     .expect("all file paths should be children of `self.directory_path`");
                 let hash = hasher.finalize();
                 // Because we've only hashed a single file, the number of
                 // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
+                // Blocking on sending after hashing has completed is intentional.
+                // If we were to instead try to send before hashing, the iterator of
+                // `DirectoryHasher` would effectively be single-threaded.
                 if let Some(tx) = &self.progress_channel {
                     tx.send(path.clone())?;
                 }
