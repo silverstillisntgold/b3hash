@@ -8,18 +8,17 @@ A crate for creating and validating directory hashfiles.
 
 #![forbid(missing_docs, unsafe_code)]
 
+pub use camino::{Utf8Path, Utf8PathBuf};
+pub use hasher::{DirectoryHasher, DirectoryHasherIter};
+pub use manifest::*;
+pub use verifier::*;
+
+use std::sync::mpsc::SendError;
+
 mod file;
 mod hasher;
 mod manifest;
 mod verifier;
-
-use std::sync::mpsc::SendError;
-
-pub use self::hasher::{DirectoryHasher, DirectoryHasherIter};
-pub use manifest::*;
-pub use verifier::*;
-
-pub use camino::{Utf8Path, Utf8PathBuf};
 
 /// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.
 pub const HASHFILE: &str = ".b3hash";
@@ -31,6 +30,10 @@ pub enum HashingError {
     #[error("file hashing was canceled early")]
     Canceled,
 
+    /// Indicates that there was a symlink within the target directory.
+    #[error("a symlink was within the target directory")]
+    FoundSymlink,
+
     /// Indicates that there was an IO error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -40,7 +43,7 @@ pub enum HashingError {
     Send(#[from] SendError<Utf8PathBuf>),
 }
 
-/// An error that might occur when serializing/deserializing a [`Manifest`].
+/// An error that might occur when serializing or deserializing a [`Manifest`].
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {
     /// Indicates that there was an IO error.

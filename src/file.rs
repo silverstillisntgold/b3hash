@@ -1,8 +1,7 @@
-use crate::{HASHFILE, hasher::DirectoryHasher};
+use crate::{HASHFILE, HashingError, hasher::DirectoryHasher};
 use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 use rayon::Scope;
-use std::io;
 
 const ERROR_CAPACITY: usize = 1 << 2;
 const FILE_CAPACITY_GLOBAL: usize = 1 << 20;
@@ -15,7 +14,7 @@ macro_rules! unwrap_or_push_error_and_return {
         match ($fallible_expr) {
             Ok(v) => v,
             Err(e) => {
-                ($errors).lock().push(e);
+                ($errors).lock().push(e.into());
                 return;
             }
         }
@@ -25,7 +24,7 @@ macro_rules! unwrap_or_push_error_and_return {
 /// Utility struct for recursively finding all files within a directory.
 pub struct FileFinder<'a> {
     directory_hasher: &'a DirectoryHasher,
-    errors: Mutex<Vec<io::Error>>,
+    errors: Mutex<Vec<HashingError>>,
     paths: Mutex<Vec<Utf8PathBuf>>,
 }
 
@@ -42,7 +41,7 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 impl<'a> FileFinder<'a> {
     /// Returns an unsorted list of all files within the specified directory.
     #[inline(never)]
-    pub fn find(self) -> Result<Vec<Utf8PathBuf>, io::Error> {
+    pub fn find(self) -> Result<Vec<Utf8PathBuf>, HashingError> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
         rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
         // If any errors were found, we only propagate the first.
@@ -81,6 +80,9 @@ impl<'a> FileFinder<'a> {
                 paths_local.push(path);
             } else if file_type.is_dir() {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
+            } else if file_type.is_symlink() && !self.directory_hasher.ignore_symlinks {
+                self.errors.lock().push(HashingError::FoundSymlink);
+                return;
             }
         }
         // Avoid locking `self.paths` when current `dir_path` only contains directories.

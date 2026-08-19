@@ -122,6 +122,10 @@ pub struct DirectoryHasher {
     #[builder(default = true)]
     pub(crate) respect_hidden: bool,
 
+    /// Should symlinks be ignored? When false, discovering a symlink will cause an error.
+    #[builder(default = true)]
+    pub(crate) ignore_symlinks: bool,
+
     /// Optional [`SyncSender`] for sending paths of hashed files to a [`Receiver`].
     ///
     /// The order in which file paths are sent over this channel is non-deterministic.
