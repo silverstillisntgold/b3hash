@@ -6,11 +6,6 @@ A crate for creating and validating directory hashfiles.
 
 #![forbid(missing_docs, unsafe_code)]
 
-mod file;
-mod hasher;
-mod manifest;
-mod verifier;
-
 pub use camino::{Utf8Path, Utf8PathBuf};
 pub use hasher::{DirectoryHasher, DirectoryHasherIter};
 pub use manifest::*;
@@ -18,6 +13,11 @@ pub use verifier::*;
 
 use blake3::{Hash, Hasher};
 use std::sync::mpsc::SendError;
+
+mod file;
+mod hasher;
+mod manifest;
+mod verifier;
 
 /// The target file for serialization and deserialization of [`Manifest`]'s.
 pub const HASHFILE: &str = ".b3hash";
