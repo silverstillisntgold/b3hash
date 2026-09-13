@@ -39,11 +39,12 @@ impl<'a> From<&'a DirectoryHasher> for FileFinder<'a> {
 }
 
 impl<'a> FileFinder<'a> {
-    /// Returns an unsorted list of all files within the specified directory.
+    /// Returns an **unsorted** list of all files within the specified directory.
     #[inline(never)]
     pub fn find(self) -> Result<Vec<Utf8PathBuf>, HashingError> {
         let root_dir_path = self.directory_hasher.directory_path.clone();
         rayon::in_place_scope(|scope| self.recurse_directory(scope, root_dir_path));
+
         // If any errors were found, we only propagate the first.
         match self.errors.into_inner().into_iter().next() {
             None => Ok(self.paths.into_inner()),
@@ -57,25 +58,30 @@ impl<'a> FileFinder<'a> {
     ///
     /// Directories spawn new instances of `recurse_directory` with themselves as `dir_path`.
     ///
-    /// Symlinks are ignored (fuck symlinks).
+    /// Symlinks are either ignored (fuck symlinks), or cause an error to be propagated.
     fn recurse_directory(&'a self, scope: &Scope<'a>, dir_path: Utf8PathBuf) {
         // Only checked once to minimize lock contention.
         if !self.errors.lock().is_empty() {
             return;
         }
+
         let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
         // Per-directory buffer so `self.paths` only needs to be locked once.
         let mut paths_local = Vec::with_capacity(FILE_CAPACITY_LOCAL);
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, self.errors);
+
             if self.should_skip(entry.file_name()) {
                 continue;
             }
+
+            // Need to cache the file type so we can destructure `entry`.
             let file_type = unwrap_or_push_error_and_return!(entry.file_type(), self.errors);
             // We store paths instead of entries because entries can be
             // fucking massive (632 bytes on Windows), but paths are always
             // just a fancy wrapper for an underlying vector (32 bytes).
             let path = entry.into_path();
+
             if file_type.is_file() {
                 paths_local.push(path);
             } else if file_type.is_dir() {
@@ -85,7 +91,8 @@ impl<'a> FileFinder<'a> {
                 return;
             }
         }
-        // Avoid locking `self.paths` when current `dir_path` only contains directories.
+
+        // Only lock `self.paths` when current `dir_path` contains files.
         if !paths_local.is_empty() {
             self.paths.lock().extend(paths_local);
         }
@@ -100,6 +107,7 @@ impl<'a> FileFinder<'a> {
                 "we're operating on the assumption that \"HASHFILE\" is hidden"
             );
         }
+
         if self.directory_hasher.respect_hidden {
             // The hashfile itself is hidden, so there's no need to explicitly
             // check for it when we're already respecting hidden entries.
