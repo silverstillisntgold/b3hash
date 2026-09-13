@@ -7,7 +7,10 @@ use std::fs;
 
 // For doc links.
 #[allow(unused)]
-use crate::hasher::{DirectoryHasher, DirectoryHasherIter};
+use crate::{
+    hasher::{DirectoryHasher, DirectoryHasherIter},
+    verifier::verify,
+};
 
 const COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 const MEGABYTE: usize = 1 << 20;
@@ -15,7 +18,7 @@ const MEGABYTE: usize = 1 << 20;
 /// The result of calling [`DirectoryHasher::hash`], or consuming the entirety of a [`DirectoryHasherIter`].
 ///
 /// Can be serialized into a b3hash file with [`Self::serialize`], or used to verify against
-/// another [`Manifest`] using [`verify`](crate::verifier::verify).
+/// another [`Manifest`] using [`verify`].
 ///
 /// If a [`Manifest`] instance is the result of calling [`Self::deserialize`], then it is
 /// not possible to re-serialize it. That is to say that [`Manifest`]'s can only be serialized
