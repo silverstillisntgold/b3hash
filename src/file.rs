@@ -104,7 +104,7 @@ impl<'a> FileFinder<'a> {
         const {
             assert!(
                 HASHFILE.as_bytes()[0] == HIDDEN_ENTRY_PREFIX as u8,
-                "we're operating on the assumption that \"HASHFILE\" is hidden"
+                "we're operating on the assumption that `HASHFILE` is hidden"
             );
         }
 

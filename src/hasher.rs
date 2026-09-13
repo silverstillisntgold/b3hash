@@ -67,6 +67,7 @@ impl DirectoryHasherIter {
     /// Note that this method may block while any in-progress file hashing completes.
     pub fn cancel(self) {
         self.cancel_handle.store(true, Ordering::Relaxed);
+
         // Make sure the thread is joined, otherwise it ends up detached.
         let _ = self.into_manifest();
     }
@@ -85,6 +86,7 @@ impl DirectoryHasherIter {
         for path in &mut self {
             f(path);
         }
+
         // Because we should never panic anywhere else, this should only panic when
         // we have an underlying library/OS failure, which is out of our control.
         self.manifest_handle.join().unwrap()
@@ -141,10 +143,11 @@ pub struct DirectoryHasher {
 
 impl IntoIterator for DirectoryHasher {
     type Item = Utf8PathBuf;
+
     type IntoIter = DirectoryHasherIter;
 
     fn into_iter(mut self) -> Self::IntoIter {
-        // Using a bounded, 0-length channel so the backing computation
+        // Using a bounded, 0-length channel so each backing computation
         // thread only progresses when calling `next` on the iterator.
         let (tx, rx) = mpsc::sync_channel(0);
         self.progress_channel = Some(tx);
@@ -164,6 +167,7 @@ impl DirectoryHasher {
     pub fn hash(mut self) -> Result<Manifest, HashingError> {
         // Canonicalize to avoid any potential issues with relative paths.
         self.directory_path = self.directory_path.canonicalize_utf8()?;
+
         let file_list = FileFinder::from(&self).find()?;
         let mut entries = self.hash_files(file_list)?;
         // Because we've canonicalized the directory path, all the elements in `file_list` will also
@@ -173,6 +177,7 @@ impl DirectoryHasher {
         // Doing sorting here means we are comparing the paths after they've been stripped of
         // their common prefix (directory path and all it's parents), which makes comparison much faster.
         entries.sort_unstable_by(|a, b| a.path().cmp(b.path()));
+
         self.hash_directory(entries)
     }
 
@@ -186,6 +191,7 @@ impl DirectoryHasher {
                 {
                     return Err(HashingError::Canceled);
                 }
+
                 let mut hasher = Hasher::new();
                 // We want to use a reader here because we will likely be reading many large
                 // files at once. If we were to load them into memory we'd quickly run out
@@ -194,6 +200,7 @@ impl DirectoryHasher {
                 // is a perfect middle ground for our implementation.
                 let reader = fs::File::open(file_path.as_std_path())?;
                 hasher.update_reader(reader)?;
+
                 let path = file_path
                     .strip_prefix(self.directory_path.as_std_path())
                     .map(Utf8Path::to_path_buf)
@@ -202,12 +209,14 @@ impl DirectoryHasher {
                 // Because we've only hashed a single file, the number of
                 // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
+
                 // Blocking on sending after hashing has completed is intentional.
                 // If we were to instead try to send before hashing, the iterator of
                 // `DirectoryHasher` would effectively be single-threaded.
                 if let Some(tx) = &self.progress_channel {
                     tx.send(path.clone())?;
                 }
+
                 Ok(Entry { path, hash, size })
             })
             .collect()
