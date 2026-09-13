@@ -6,16 +6,18 @@ const CAPACITY: usize = 1 << 7;
 /// Contains the differences between the two [`Manifest`]'s which were used to call [`verify`].
 #[derive(Debug)]
 pub struct DirectoryDiff {
-    old_only: Vec<Entry>,
-    new_only: Vec<Entry>,
     changed: Vec<(Entry, Entry)>,
+    new_only: Vec<Entry>,
+    old_only: Vec<Entry>,
 }
 
 impl DirectoryDiff {
-    /// Returns the entries which only existed in the old [`Manifest`].
+    /// Returns the entries which existed in both [`Manifest`]'s, but were different.
+    ///
+    /// The `path` field of each [`Entry`] pair in this slice will always be equal.
     #[inline]
-    pub fn old_only(&self) -> &[Entry] {
-        &self.old_only
+    pub fn changed(&self) -> &[(Entry, Entry)] {
+        &self.changed
     }
 
     /// Returns the entries which only existed in the new [`Manifest`].
@@ -24,12 +26,10 @@ impl DirectoryDiff {
         &self.new_only
     }
 
-    /// Returns the entries which existed in both [`Manifest`]'s, but were different.
-    ///
-    /// The `path` field of each [`Entry`] pair in this slice will always be equal.
+    /// Returns the entries which only existed in the old [`Manifest`].
     #[inline]
-    pub fn changed(&self) -> &[(Entry, Entry)] {
-        &self.changed
+    pub fn old_only(&self) -> &[Entry] {
+        &self.old_only
     }
 }
 
@@ -64,9 +64,9 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<Director
     // certain that there **must** be some kind of difference between the two manifests.
 
     let mut result = DirectoryDiff {
-        old_only: Vec::with_capacity(CAPACITY),
-        new_only: Vec::with_capacity(CAPACITY),
         changed: Vec::with_capacity(CAPACITY),
+        new_only: Vec::with_capacity(CAPACITY),
+        old_only: Vec::with_capacity(CAPACITY),
     };
 
     // These both need to be peekable because we need to be able to view the next entry
