@@ -18,7 +18,7 @@ const MEGABYTE: usize = 1 << 20;
 /// another [`Manifest`] using [`verify`](crate::verifier::verify).
 ///
 /// If a [`Manifest`] instance is the result of calling [`Self::deserialize`], then it is
-/// not possible to reserialize it. That is to say that [`Manifest`]'s can only be serialized
+/// not possible to re-serialize it. That is to say that [`Manifest`]'s can only be serialized
 /// when they come directly from a [`DirectoryHasher`] or it's iterator.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
@@ -76,7 +76,7 @@ impl Manifest {
         let m: Manifest = serde_json::from_reader(decoder)?;
 
         // Make sure all entries are sorted.
-        if !m.entries().is_sorted_by_key(Entry::path) {
+        if !m.entries.is_sorted_by_key(Entry::path) {
             return Err(SerdeError::Validation);
         }
 
@@ -118,7 +118,7 @@ impl Manifest {
 
     /// Returns the hash of `self`.
     ///
-    /// This is the cumulative hash of all [`Entry`]'s within the root directory.
+    /// This is the cumulative hash of all [`Entry`]'s within `self`.
     #[inline]
     pub fn hash(&self) -> &Hash {
         &self.directory_hash
@@ -126,7 +126,7 @@ impl Manifest {
 
     /// Returns the size of `self`, in bytes.
     ///
-    /// This is the cumulative size of all [`Entry`]'s within the root directory.
+    /// This is the cumulative size of all [`Entry`]'s within `self`.
     #[inline]
     pub fn size(&self) -> u64 {
         self.directory_size
@@ -134,17 +134,14 @@ impl Manifest {
 
     /// Returns a slice containing all [`Entry`]'s which make up `self`.
     ///
-    /// The returned slice is sorted by the `path` field of each [`Entry`],
-    /// when said `path` is in it's [`str`] representation.
+    /// The slice is sorted by [`Entry::path`].
     #[inline]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }
 }
 
-/// Struct containing the data of a hashed file.
-///
-/// Only exists within a parent [`Manifest`].
+/// Struct containing the data of a hashed file entry.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Entry {
     pub(crate) path: Utf8PathBuf,
