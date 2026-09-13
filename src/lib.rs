@@ -6,19 +6,20 @@ A crate for creating and validating directory hashfiles.
 
 #![forbid(missing_docs, unsafe_code)]
 
-pub use camino::{Utf8Path, Utf8PathBuf};
-pub use hasher::{DirectoryHasher, DirectoryHasherIter};
-pub use manifest::*;
-pub use verifier::*;
-
-use std::sync::mpsc::SendError;
-
 mod file;
 mod hasher;
 mod manifest;
 mod verifier;
 
-/// The name of the file where instances of [`Manifest`] will be serialized/deserialized to/from.
+pub use camino::{Utf8Path, Utf8PathBuf};
+pub use hasher::{DirectoryHasher, DirectoryHasherIter};
+pub use manifest::*;
+pub use verifier::*;
+
+use blake3::{Hash, Hasher};
+use std::sync::mpsc::SendError;
+
+/// The target file for serialization and deserialization of [`Manifest`]'s.
 pub const HASHFILE: &str = ".b3hash";
 
 /// An error that might occur when hashing a directory.
@@ -58,14 +59,13 @@ pub enum SerdeError {
 }
 
 /// Calculates the cumulative hash and size of all elements in `entries`.
-fn hash_entries(entries: &[Entry]) -> (blake3::Hash, u64) {
-    let mut hasher = blake3::Hasher::new();
+fn hash_entries(entries: &[Entry]) -> (Hash, u64) {
+    let mut hasher = Hasher::new();
     let mut size = 0;
+
     // WARNING: Changing the order in which these fields are fed to the
     // hasher will change the finalized hash value, so don't do that :).
     for entry in entries {
-        // Explicitly use LE to avoid differences across platforms.
-        let size_as_bytes = entry.size.to_le_bytes();
         // Hashing each component individually instead of converting the
         // path to a str and hashing that means we avoid having to worry
         // about path component separator normalization.
@@ -74,15 +74,22 @@ fn hash_entries(entries: &[Entry]) -> (blake3::Hash, u64) {
             .components()
             .map(|component| component.as_str())
         {
+            hasher.update(s.as_bytes());
+
             // Explicitly use LE to avoid differences across platforms.
             let len_as_bytes = s.len().to_le_bytes();
-            hasher.update(s.as_bytes());
             hasher.update(&len_as_bytes);
         }
+
         hasher.update(entry.hash.as_bytes());
+
+        // Explicitly use LE to avoid differences across platforms.
+        let size_as_bytes = entry.size.to_le_bytes();
         hasher.update(&size_as_bytes);
+
         size += entry.size;
     }
+
     let hash = hasher.finalize();
     (hash, size)
 }
