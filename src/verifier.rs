@@ -44,7 +44,8 @@ impl DirectoryDiff {
 pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<DirectoryDiff> {
     // Fast path: If both the total size and the hash of two directories are identical,
     // the probability of there being a mismatch of internal data between the two is so
-    // astronomically tiny that we can safely assume they are the same.
+    // astronomically tiny that we can safely assume they are the same. This is the entire
+    // purpose of using a very strong hashing function :).
     //
     // Size is compared first because it's the cheaper comparison, and is almost certainly going to
     // be different in cases where the hash is also different. We compare the bytes of the hash
@@ -80,7 +81,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<Director
                 // position, and they must both be consumed to keep them in lockstep.
                 let old = old_iter.next().unwrap();
                 let new = new_iter.next().unwrap();
-                // We're just checking for size or hash differences.
+                // Paths are equal, so we're just checking for size or hash differences.
                 if old.size != new.size || old.hash.as_bytes() != new.hash.as_bytes() {
                     result.changed.push((old, new));
                 }
