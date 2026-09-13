@@ -93,7 +93,7 @@ impl Manifest {
             return Err(SerdeError::Validation);
         }
 
-        // Make sure the global hash and size are accurate.
+        // Make sure the global hash and size are correct.
         let (hash, size) = hash_entries(&m.entries);
         if size != m.directory_size || hash.as_bytes() != m.directory_hash.as_bytes() {
             return Err(SerdeError::Validation);
