@@ -82,7 +82,7 @@ pub fn verify(old_manifest: Manifest, new_manifest: Manifest) -> Option<Director
                 let old = old_iter.next().unwrap();
                 let new = new_iter.next().unwrap();
                 // Paths are equal, so we're just checking for size or hash differences.
-                if old.size != new.size || old.hash.as_bytes() != new.hash.as_bytes() {
+                if old.size() != new.size() || old.hash().as_bytes() != new.hash().as_bytes() {
                     result.changed.push((old, new));
                 }
             }
