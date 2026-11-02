@@ -151,8 +151,11 @@ impl IntoIterator for DirectoryHasher {
         // thread only progresses when calling `next` on the iterator.
         let (tx, rx) = mpsc::sync_channel(0);
         self.progress_channel = Some(tx);
+
         let cancel_handle = self.cancel_handle();
+
         let manifest_handle = thread::spawn(|| self.hash());
+
         Self::IntoIter {
             cancel_handle,
             manifest_handle,
@@ -170,11 +173,12 @@ impl DirectoryHasher {
 
         let file_list = FileFinder::from(&self).find()?;
         let mut entries = self.hash_files(file_list)?;
+
         // Because we've canonicalized the directory path, all the elements in `file_list` will also
         // have canonicalized paths, which increases the number of components in each `Utf8PathBuf`.
         // The comparison of `Utf8PathBuf` operates on it's components, so more components means the
         // comparison takes longer. And having fully canonicalized paths makes it as long as possible.
-        // Doing sorting here means we are comparing the paths after they've been stripped of
+        // Doing sorting here means we are comparing the paths **after** they've been stripped of
         // their common prefix (directory path and all it's parents), which makes comparison much faster.
         entries.sort_unstable_by(|a, b| a.path().cmp(b.path()));
 
@@ -234,8 +238,11 @@ impl DirectoryHasher {
             .file_name()
             .unwrap_or(self.directory_path.as_str())
             .to_owned();
+
         let directory_path = Some(self.directory_path);
+
         let (directory_hash, directory_size) = hash_entries(&entries);
+
         Ok(Manifest {
             directory_path,
             directory_name,

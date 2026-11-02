@@ -45,11 +45,13 @@ impl Manifest {
         let Some(path) = self.path().map(|path| path.join(HASHFILE)) else {
             return Ok(false);
         };
+
         let buffer = Vec::with_capacity(8 * MEGABYTE);
         let mut encoder = zstd::Encoder::new(buffer, COMPRESSION_LEVEL)?;
         serde_json::to_writer(&mut encoder, &self)?;
         let contents = encoder.finish()?;
         fs::write(path, contents)?;
+
         Ok(true)
     }
 
@@ -74,6 +76,7 @@ impl Manifest {
     #[inline(never)]
     fn deserialize_internal(path: &Utf8Path) -> Result<Manifest, SerdeError> {
         let path = path.join(HASHFILE);
+
         let file = fs::File::open(path)?;
         let decoder = zstd::Decoder::new(file)?;
         let m: Manifest = serde_json::from_reader(decoder)?;

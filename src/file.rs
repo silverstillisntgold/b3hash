@@ -21,7 +21,7 @@ macro_rules! unwrap_or_push_error_and_return {
     };
 }
 
-/// Utility struct for recursively finding all files within a directory.
+/// Recursively finds all files within a directory.
 pub struct FileFinder<'a> {
     directory_hasher: &'a DirectoryHasher,
     errors: Mutex<Vec<HashingError>>,
@@ -65,9 +65,10 @@ impl<'a> FileFinder<'a> {
             return;
         }
 
-        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
         // Per-directory buffer so `self.paths` only needs to be locked once.
         let mut paths_local = Vec::with_capacity(FILE_CAPACITY_LOCAL);
+        let entries = unwrap_or_push_error_and_return!(dir_path.read_dir_utf8(), self.errors);
+
         for entry in entries {
             let entry = unwrap_or_push_error_and_return!(entry, self.errors);
 
@@ -75,11 +76,12 @@ impl<'a> FileFinder<'a> {
                 continue;
             }
 
-            // Need to cache the file type so we can destructure `entry`.
+            // Need to cache the file type before we destruct `entry`.
             let file_type = unwrap_or_push_error_and_return!(entry.file_type(), self.errors);
+
             // We store paths instead of entries because entries can be
-            // fucking massive (632 bytes on Windows), but paths are always
-            // just a fancy wrapper for an underlying vector (32 bytes).
+            // fucking massive (632 bytes on Windows), but paths are just
+            // a fancy wrapper for an underlying buffer (32 bytes).
             let path = entry.into_path();
 
             if file_type.is_file() {
@@ -87,12 +89,27 @@ impl<'a> FileFinder<'a> {
             } else if file_type.is_dir() {
                 scope.spawn(|new_scope| self.recurse_directory(new_scope, path));
             } else if file_type.is_symlink() && !self.directory_hasher.ignore_symlinks {
-                self.errors.lock().push(HashingError::FoundSymlink);
+                let mut errors = self.errors.lock();
+
+                // Finding symlinks when the user doesn't want to ignore them is particularly
+                // egregious, since it's part of the structure of the directory they're hashing
+                // and will always occur. We really want to make sure they see that error, so we
+                // force it to be at the front of `self.errors`.
+                if let Some(first) = errors.first_mut() {
+                    // If there's already a symlink error at the front then we leave it as-is.
+                    if !matches!(first, HashingError::FoundSymlink(_)) {
+                        *first = HashingError::FoundSymlink(path);
+                    }
+                } else {
+                    errors.push(HashingError::FoundSymlink(path))
+                }
+
                 return;
             }
         }
 
-        // Only lock `self.paths` when current `dir_path` contains files.
+        // Avoid acquiring a lock on the shared `self.paths` when
+        // we won't be doing any work with it.
         if !paths_local.is_empty() {
             self.paths.lock().extend(paths_local);
         }

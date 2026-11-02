@@ -22,7 +22,7 @@ mod verifier;
 /// The target file for serialization and deserialization of [`Manifest`]'s.
 pub const HASHFILE: &str = ".b3hash";
 
-/// An error that might occur when hashing a directory.
+/// An error that can occur when hashing a directory.
 #[derive(Debug, thiserror::Error)]
 pub enum HashingError {
     /// Indicates that file hashing was canceled early.
@@ -30,8 +30,10 @@ pub enum HashingError {
     Canceled,
 
     /// Indicates that there was a symlink within the target directory.
+    ///
+    /// Contains the path of the found symlink.
     #[error("a symlink was within the target directory")]
-    FoundSymlink,
+    FoundSymlink(Utf8PathBuf),
 
     /// Indicates that there was an IO error.
     #[error(transparent)]
@@ -42,7 +44,7 @@ pub enum HashingError {
     Send(#[from] SendError<Utf8PathBuf>),
 }
 
-/// An error that might occur when serializing or deserializing a [`Manifest`].
+/// An error that can occur when serializing and deserializing a [`Manifest`].
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeError {
     /// Indicates that there was an IO error.
