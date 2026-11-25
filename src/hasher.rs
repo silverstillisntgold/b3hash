@@ -147,9 +147,9 @@ impl IntoIterator for DirectoryHasher {
     type IntoIter = DirectoryHasherIter;
 
     fn into_iter(mut self) -> Self::IntoIter {
-        // Using a bounded, 0-length channel so each backing computation
-        // thread only progresses when calling `next` on the iterator.
-        let (tx, rx) = mpsc::sync_channel(0);
+        // Arbitrarily chosen.
+        let channel_bound = rayon::current_num_threads() * 2;
+        let (tx, rx) = mpsc::sync_channel(channel_bound);
         self.progress_channel = Some(tx);
 
         let cancel_handle = self.cancel_handle();
@@ -179,7 +179,8 @@ impl DirectoryHasher {
         // The comparison of `Utf8PathBuf` operates on it's components, so more components means the
         // comparison takes longer. And having fully canonicalized paths makes it as long as possible.
         // Doing sorting here means we are comparing the paths **after** they've been stripped of
-        // their common prefix (directory path and all it's parents), which makes comparison much faster.
+        // their common prefix (directory path and all it's parents), which might comparison much faster,
+        // but will certainly never make it slower.
         entries.sort_unstable_by(|a, b| a.path().cmp(b.path()));
 
         self.hash_directory(entries)
@@ -214,9 +215,6 @@ impl DirectoryHasher {
                 // bytes hashed represents the size of the file in bytes.
                 let size = hasher.count();
 
-                // Blocking on sending after hashing has completed is intentional.
-                // If we were to instead try to send before hashing, the iterator of
-                // `DirectoryHasher` would effectively be single-threaded.
                 if let Some(tx) = &self.progress_channel {
                     tx.send(path.clone())?;
                 }
